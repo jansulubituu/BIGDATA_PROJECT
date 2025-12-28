@@ -13,7 +13,7 @@ KAFKA_BOOTSTRAP = os.getenv('WSL2_IP', 'localhost') + ':9092'
 KAFKA_TOPIC = 'house-listings'
 MONGODB_URI = "mongodb://localhost:27017/bigdata_houses.listings"
 HDFS_PATH = "hdfs://localhost:9000/bigdata/house-listings"
-CHECKPOINT_PATH = "hdfs://localhost:9000/bigdata/checkpoints"
+CHECKPOINT_PATH = "file:///tmp/spark-checkpoints"  # Dùng local thay vì HDFS
 
 print(f"[CONFIG] Kafka: {KAFKA_BOOTSTRAP}")
 print(f"[CONFIG] Topic: {KAFKA_TOPIC}")
@@ -62,7 +62,7 @@ kafka_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
     .option("subscribe", KAFKA_TOPIC) \
-    .option("startingOffsets", "earliest") \
+    .option("startingOffsets", "latest") \
     .option("failOnDataLoss", "false") \
     .load()
 
@@ -93,9 +93,6 @@ cleaned_df = parsed_df \
                 .when(col("area_m2") < 100, "50-100m²")
                 .when(col("area_m2") < 200, "100-200m²")
                 .otherwise("> 200m²"))
-
-# Drop duplicates based on id
-cleaned_df = cleaned_df.dropDuplicates(["id"])
 
 print("[INFO] Data cleaning configured")
 
@@ -141,15 +138,21 @@ agg_by_district = cleaned_df \
 
 # 8. Write to MongoDB
 def write_to_mongodb(batch_df, batch_id):
-    """Ghi batch vào MongoDB"""
+    """Ghi batch vào MongoDB (upsert để tránh duplicates)"""
     try:
+        # Đếm số records trước khi insert
+        total_records = batch_df.count()
+        
         batch_df.write \
             .format("mongodb") \
             .mode("append") \
             .option("database", "bigdata_houses") \
             .option("collection", "listings") \
+            .option("replaceDocument", "true") \
+            .option("idFieldList", "id") \
+            .option("ordered", "false") \
             .save()
-        print(f"[SUCCESS] Batch {batch_id}: Written {batch_df.count()} records to MongoDB")
+        print(f"[SUCCESS] Batch {batch_id}: Processed {total_records} records to MongoDB (upsert mode)")
     except Exception as e:
         print(f"[ERROR] Batch {batch_id}: Failed to write to MongoDB: {e}")
 

@@ -588,7 +588,7 @@ KAFKA_BOOTSTRAP = os.getenv('WSL2_IP', 'localhost') + ':9092'
 KAFKA_TOPIC = 'house-listings'
 MONGODB_URI = "mongodb://localhost:27017/bigdata_houses.listings"
 HDFS_PATH = "hdfs://localhost:9000/bigdata/house-listings"
-CHECKPOINT_PATH = "hdfs://localhost:9000/bigdata/checkpoints"
+CHECKPOINT_PATH = "file:///tmp/spark-checkpoints"  # Dùng local thay vì HDFS
 
 print(f"[CONFIG] Kafka: {KAFKA_BOOTSTRAP}")
 print(f"[CONFIG] Topic: {KAFKA_TOPIC}")
@@ -600,7 +600,7 @@ spark = SparkSession.builder \
     .appName("HouseListingsStreaming") \
     .config("spark.jars.packages", 
             "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3,"
-            "org.mongodb.spark:mongo-spark-connector_2.12:10.2.0") \
+            "org.mongodb.spark:mongo-spark-connector_2.12:10.4.0") \
     .config("spark.mongodb.write.connection.uri", MONGODB_URI) \
     .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_PATH) \
     .getOrCreate()
@@ -637,7 +637,7 @@ kafka_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
     .option("subscribe", KAFKA_TOPIC) \
-    .option("startingOffsets", "earliest") \
+    .option("startingOffsets", "latest") \
     .option("failOnDataLoss", "false") \
     .load()
 
@@ -668,9 +668,6 @@ cleaned_df = parsed_df \
                 .when(col("area_m2") < 100, "50-100m²")
                 .when(col("area_m2") < 200, "100-200m²")
                 .otherwise("> 200m²"))
-
-# Drop duplicates based on id
-cleaned_df = cleaned_df.dropDuplicates(["id"])
 
 print("[INFO] Data cleaning configured")
 
@@ -719,15 +716,21 @@ agg_by_district = cleaned_df \
 
 # 8. Write to MongoDB
 def write_to_mongodb(batch_df, batch_id):
-    """Ghi batch vào MongoDB"""
+    """Ghi batch vào MongoDB (upsert để tránh duplicates)"""
     try:
+        # Đếm số records trước khi insert
+        total_records = batch_df.count()
+        
         batch_df.write \
             .format("mongodb") \
             .mode("append") \
             .option("database", "bigdata_houses") \
             .option("collection", "listings") \
+            .option("replaceDocument", "true") \
+            .option("idFieldList", "id") \
+            .option("ordered", "false") \
             .save()
-        print(f"[SUCCESS] Batch {batch_id}: Written {batch_df.count()} records to MongoDB")
+        print(f"[SUCCESS] Batch {batch_id}: Processed {total_records} records to MongoDB (upsert mode)")
     except Exception as e:
         print(f"[ERROR] Batch {batch_id}: Failed to write to MongoDB: {e}")
 
@@ -911,6 +914,45 @@ kafka-consumer-groups.sh \
 ---
 
 ### 🛠️ Troubleshooting Stream Processing
+
+#### Lỗi: Checkpoint corrupt (Error reading delta file)
+
+**Nguyên nhân:** Spark Streaming bị dừng đột ngột hoặc HDFS checkpoint bị lỗi.
+
+**Giải pháp:**
+```bash
+# 1. Dừng Spark Streaming (Ctrl+C)
+# Đợi shutdown hoàn toàn (~10 giây)
+
+# 2. Xóa checkpoint
+rm -rf /tmp/spark-checkpoints
+
+# 3. Chạy lại Spark Streaming
+spark-submit \
+  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3,org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 \
+  --master local[*] \
+  --driver-memory 2g \
+  --executor-memory 2g \
+  spark_streaming_consumer.py
+```
+
+**Lưu ý:** Script hiện dùng local checkpoint (`file:///tmp/spark-checkpoints`) thay vì HDFS để tránh lỗi này.
+
+#### Lỗi: MongoDB duplicate key (E11000)
+
+**Nguyên nhân:** Spark đọc lại data cũ từ Kafka và cố insert vào MongoDB.
+
+**Giải pháp:** Script đã config upsert mode với `replaceDocument=true` và `idFieldList=id`. Nếu vẫn lỗi:
+```bash
+# Option 1: Xóa data cũ trong MongoDB
+mongosh
+use bigdata_houses
+db.listings.deleteMany({})
+exit
+
+# Option 2: Xóa checkpoint và chạy lại
+rm -rf /tmp/spark-checkpoints
+```
 
 #### Lỗi: HDFS không khởi động (NameNode/DataNode không xuất hiện trong jps)
 
@@ -1293,9 +1335,35 @@ Sử dụng:
 - [ ] Tạo file `spark_streaming_consumer.py`
 - [ ] Chạy Spark Streaming
 - [ ] Chạy Producer để test
-- [ ] Kiểm tra Spark UI
+- [ ] Kiểm tra Spark UI (http://localhost:4040)
 - [ ] Kiểm tra dữ liệu trong HDFS
 - [ ] Kiểm tra dữ liệu trong MongoDB
-- [ ] Monitor consumer lag
+- [ ] Verify không còn lỗi checkpoint/duplicate
+
+### 🎯 Kết quả mong đợi
+
+**Spark Streaming chạy thành công khi thấy:**
+```
+[SUCCESS] Batch 0: Processed X records to MongoDB (upsert mode)
+[SUCCESS] Batch 1: Processed X records to MongoDB (upsert mode)
+```
+
+**Không có lỗi:**
+- ❌ Checkpoint corrupt errors
+- ❌ E11000 duplicate key errors
+- ❌ HDFS connection refused
+
+**Warnings có thể ignore:**
+- ⚠️ `Unable to load native-hadoop library` (bình thường trên WSL2)
+- ⚠️ `CaseInsensitiveStringMap: Converting duplicated key` (không ảnh hưởng)
+- ⚠️ `Current batch is falling behind` (bình thường với batch đầu tiên)
+
+### 📝 Lưu ý quan trọng
+
+1. **startingOffsets="latest"**: Chỉ xử lý data MỚI, tránh đọc lại data cũ
+2. **Local checkpoint**: Dùng `file:///tmp/spark-checkpoints` thay vì HDFS (ổn định hơn)
+3. **MongoDB upsert**: Config `replaceDocument=true` để tự động update thay vì lỗi duplicate
+4. **Không dùng dropDuplicates()**: Gây lỗi checkpoint, dùng MongoDB unique index thay thế
+5. **Dừng Spark an toàn**: Nhấn Ctrl+C một lần và đợi shutdown hoàn toàn (tránh corrupt checkpoint)
 
 ---
