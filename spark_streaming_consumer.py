@@ -7,11 +7,14 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Cấu hình
 KAFKA_BOOTSTRAP = os.getenv('WSL2_IP', 'localhost') + ':9092'
 KAFKA_TOPIC = 'house-listings'
-MONGODB_URI = "mongodb://localhost:27017/bigdata_houses.listings"
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/bigdata_houses.listings")
 HDFS_PATH = "hdfs://localhost:9000/bigdata/house-listings"
 CHECKPOINT_PATH = "file:///tmp/spark-checkpoints"  # Dùng local thay vì HDFS
 

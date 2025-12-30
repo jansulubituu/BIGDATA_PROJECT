@@ -995,6 +995,47 @@ chmod 0600 ~/.ssh/authorized_keys
 ssh localhost
 ```
 
+#### Lỗi: Kafka topic bị mất sau khi restart
+
+**Nguyên nhân:** Kafka data directory mặc định ở `/tmp/kafka-logs` có thể bị xóa khi reboot.
+
+**Giải pháp - Đổi Kafka data directory sang vị trí cố định:**
+```bash
+# 1. Tạo thư mục lưu trữ vĩnh viễn
+sudo mkdir -p /usr/local/kafka/data
+sudo chown -R $USER:$USER /usr/local/kafka/data
+
+# 2. Sửa file config
+nano /usr/local/kafka/config/server.properties
+
+# 3. Tìm dòng: log.dirs=/tmp/kafka-logs
+# Thay bằng: log.dirs=/usr/local/kafka/data
+
+# 4. Tương tự cho Zookeeper
+sudo mkdir -p /usr/local/kafka/zookeeper-data
+sudo chown -R $USER:$USER /usr/local/kafka/zookeeper-data
+
+nano /usr/local/kafka/config/zookeeper.properties
+# Tìm: dataDir=/tmp/zookeeper
+# Thay: dataDir=/usr/local/kafka/zookeeper-data
+
+# 5. Restart Kafka cluster
+bin/kafka-server-stop.sh
+bin/zookeeper-server-stop.sh
+sleep 5
+bin/zookeeper-server-start.sh config/zookeeper.properties &
+sleep 5
+bin/kafka-server-start.sh config/server.properties &
+
+# 6. Tạo lại topic (chỉ lần đầu sau khi đổi directory)
+kafka-topics.sh --create --topic house-listings \
+  --bootstrap-server localhost:9092 \
+  --partitions 3 \
+  --replication-factor 1
+```
+
+**Sau khi cấu hình, topic sẽ persistent vĩnh viễn.**
+
 #### Lỗi: Kafka connection timeout
 ```bash
 # Kiểm tra Kafka đang chạy
