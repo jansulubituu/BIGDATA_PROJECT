@@ -2,6 +2,103 @@
 
 Dự án xây dựng pipeline Big Data thu thập và xử lý dữ liệu bất động sản từ nhatot.com.
 
+## 🚀 Quick Start - Hướng dẫn cài đặt nhanh
+
+### Yêu cầu hệ thống
+- **WSL2** (Windows Subsystem for Linux 2) với Ubuntu 20.04+
+- **Python 3.8+**
+- **Java 11+**
+- **MongoDB Atlas** (hoặc MongoDB local)
+
+### Cài đặt nhanh
+
+#### 1. Cài đặt Java, Kafka, Hadoop, Spark (WSL2)
+```bash
+# Java 11
+sudo apt update
+sudo apt install openjdk-11-jdk -y
+
+# Kafka 3.6.1
+cd /usr/local
+sudo wget https://downloads.apache.org/kafka/3.6.1/kafka_2.13-3.6.1.tgz
+sudo tar -xzf kafka_2.13-3.6.1.tgz
+sudo mv kafka_2.13-3.6.1 kafka
+
+# Hadoop 3.3.6
+sudo wget https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz
+sudo tar -xzf hadoop-3.3.6.tar.gz
+sudo mv hadoop-3.3.6 hadoop
+
+# Spark 3.5.3
+sudo wget https://dlcdn.apache.org/spark/spark-3.5.3/spark-3.5.3-bin-hadoop3.tgz
+sudo tar -xzf spark-3.5.3-bin-hadoop3.tgz
+sudo mv spark-3.5.3-bin-hadoop3 spark
+```
+
+#### 2. Cấu hình biến môi trường
+Thêm vào `~/.bashrc`:
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export HADOOP_HOME=/usr/local/hadoop
+export SPARK_HOME=/usr/local/spark
+export KAFKA_HOME=/usr/local/kafka
+export PATH=$PATH:$JAVA_HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$SPARK_HOME/bin:$KAFKA_HOME/bin
+export PYSPARK_PYTHON=python3
+```
+
+#### 3. Cài đặt Python dependencies
+```bash
+# Tạo virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Cài đặt packages
+pip install -r requirements.txt
+```
+
+#### 4. Cấu hình .env
+Tạo file `.env` với nội dung:
+```env
+WSL2_IP=<your_wsl2_ip>  # Lấy bằng: hostname -I
+KAFKA_PORT=9092
+KAFKA_TOPIC=house-listings
+CRAWL_LIMIT=50
+BATCH_SIZE=10
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/bigdata_houses?retryWrites=true&w=majority
+MONGODB_DATABASE=bigdata_houses
+MONGODB_COLLECTION=listings
+```
+
+#### 5. Khởi động services
+```bash
+# Zookeeper
+cd /usr/local/kafka
+bin/zookeeper-server-start.sh config/zookeeper.properties &
+
+# Kafka
+bin/kafka-server-start.sh config/server.properties &
+
+# HDFS
+start-dfs.sh
+
+# MongoDB (nếu dùng local)
+sudo systemctl start mongod
+```
+
+#### 6. Chạy pipeline
+```bash
+# Terminal 1: Producer
+python kafka_producer.py
+
+# Terminal 2: Spark Streaming
+spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3,org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 spark_streaming_consumer.py
+
+# Terminal 3: Dashboard
+python dashboard.py
+```
+
+**Xem chi tiết hướng dẫn đầy đủ bên dưới.**
+
 ## 📐 Kiến trúc hệ thống
 
 ```
@@ -42,9 +139,9 @@ Dự án xây dựng pipeline Big Data thu thập và xử lý dữ liệu bất
                        ▼
                ┌───────────────┐
                │ Visualization │
-               │ Dashboards    │
-               │ (Grafana /    │
-               │ Superset)     │
+               │ Plotly Dash   │
+               │ Real-time     │
+               │ Dashboard     │
                └───────────────┘
 ```
 
@@ -52,14 +149,19 @@ Dự án xây dựng pipeline Big Data thu thập và xử lý dữ liệu bất
 
 ```
 BIGDATA_PROJECT/
-├── CrawlData.py              # Module crawl dữ liệu từ nhatot.com API
-├── kafka_producer.py         # Kafka Producer - stream data vào Kafka ✅
-├── kafka_consumer_test.py    # Test consumer để kiểm tra data trong Kafka
-├── test_spark_streaming.py   # [CẦN TRIỂN KHAI] Spark Structured Streaming
-├── requirements.txt          # Python dependencies
-├── data_input/house/         # Dữ liệu đã crawl (backup)
-│   └── 2025-12-12/          # 36+ JSON files
-└── README.md                 # File này
+├── CrawlData.py                  # Module crawl dữ liệu từ nhatot.com API
+├── kafka_producer.py             # Kafka Producer - stream data vào Kafka
+├── spark_streaming_consumer.py   # Spark Structured Streaming - xử lý real-time
+├── dashboard.py                  # Dashboard visualization với Plotly Dash
+├── kafka_consumer_test.py        # Test consumer để kiểm tra data trong Kafka
+├── test_mongodb.py               # Test MongoDB connection
+├── requirements.txt              # Python dependencies
+├── .env                          # Environment variables (không commit)
+├── .gitignore                    # Git ignore rules
+├── data_input/house/             # Dữ liệu đã crawl (backup)
+│   └── 2025-12-12/               # JSON files
+├── README.md                     # File này
+└── README_VISUALIZATION.md       # Hướng dẫn chi tiết về dashboard
 ```
 
 ## 🔧 Môi trường cần thiết
@@ -73,7 +175,8 @@ BIGDATA_PROJECT/
 ### Python Libraries:
 ```bash
 pip install -r requirements.txt
-# Cài đặt: requests, kafka-python, python-dotenv
+# Cài đặt: requests, kafka-python, python-dotenv, pyspark, pymongo, 
+#          plotly, dash, dash-bootstrap-components, pandas
 ```
 
 ---
@@ -107,6 +210,11 @@ KAFKA_TOPIC=house-listings
 # Producer Settings
 CRAWL_LIMIT=50
 BATCH_SIZE=10
+
+# MongoDB Atlas Configuration
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/bigdata_houses?retryWrites=true&w=majority
+MONGODB_DATABASE=bigdata_houses
+MONGODB_COLLECTION=listings
 ```
 
 **Lưu ý:** 
@@ -1406,5 +1514,234 @@ Sử dụng:
 3. **MongoDB upsert**: Config `replaceDocument=true` để tự động update thay vì lỗi duplicate
 4. **Không dùng dropDuplicates()**: Gây lỗi checkpoint, dùng MongoDB unique index thay thế
 5. **Dừng Spark an toàn**: Nhấn Ctrl+C một lần và đợi shutdown hoàn toàn (tránh corrupt checkpoint)
+
+---
+
+## Phần 3: VISUALIZATION - Real-time Dashboard
+
+### Tổng quan
+
+Dashboard visualization real-time được xây dựng bằng **Plotly Dash** để hiển thị insights từ dữ liệu bất động sản đã được xử lý và lưu trong MongoDB Atlas.
+
+### Tính năng Dashboard
+
+#### 1. Key Metrics Cards (4 cards)
+- **📊 Tổng số tin đăng**: Tổng số tin đăng trong database
+- **💰 Giá trung bình**: Giá trung bình (tỷ VNĐ hoặc triệu VNĐ)
+- **📐 Diện tích trung bình**: Diện tích trung bình (m²)
+- **📍 Số quận/huyện**: Số quận/huyện có dữ liệu
+
+#### 2. Interactive Charts (6 charts)
+- **📊 Phân bố giá**: Histogram phân bố giá với gradient colors
+- **📐 Phân bố diện tích**: Histogram phân bố diện tích với gradient colors
+- **🏘️ Giá trung bình theo Quận/Huyện**: Bar chart top 20 quận/huyện (full width)
+- **💰 Phân bố theo Mức giá**: Pie chart (donut style) phân loại theo mức giá
+- **📐 Phân bố theo Mức diện tích**: Pie chart (donut style) phân loại theo diện tích
+- **📈 Tương quan Giá và Diện tích**: Scatter plot với color theo quận
+
+#### 3. Real-time Updates
+- Auto-refresh mỗi 30 giây
+- Hiển thị timestamp cập nhật cuối cùng
+- Responsive design, hỗ trợ mobile
+
+### Cài đặt và Chạy Dashboard
+
+#### Bước 1: Đảm bảo dependencies đã cài đặt
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Kiểm tra packages
+pip list | grep -E "dash|plotly|pandas|pymongo"
+```
+
+Nếu thiếu, cài đặt:
+```bash
+pip install plotly dash dash-bootstrap-components pandas pymongo
+```
+
+#### Bước 2: Kiểm tra file .env
+Đảm bảo file `.env` có các biến MongoDB:
+```env
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/bigdata_houses?retryWrites=true&w=majority
+MONGODB_DATABASE=bigdata_houses
+MONGODB_COLLECTION=listings
+```
+
+#### Bước 3: Test MongoDB connection
+```bash
+python test_mongodb.py
+```
+
+**Kết quả mong đợi:**
+```
+✅ Connected successfully!
+📄 Collection 'listings': X documents
+```
+
+#### Bước 4: Chạy Dashboard
+
+**Từ WSL2:**
+```bash
+cd /mnt/c/Thanh/HUST/20251/BigData/BIGDATA_PROJECT
+source venv/bin/activate
+python dashboard.py
+```
+
+**Kết quả mong đợi:**
+```
+================================================================================
+🚀 Đang khởi động Dashboard Phân tích Bất động sản...
+================================================================================
+📊 MongoDB: bigdata_houses.listings
+🌐 Dashboard sẽ có sẵn tại:
+   - Local: http://localhost:8050
+   - Từ Windows: http://<WSL2_IP>:8050
+   (Lấy WSL2 IP: hostname -I)
+================================================================================
+⏳ Tự động làm mới mỗi 30 giây
+Nhấn Ctrl+C để dừng
+================================================================================
+Dash is running on http://0.0.0.0:8050/
+```
+
+#### Bước 5: Truy cập Dashboard
+
+1. **Lấy WSL2 IP:**
+   ```bash
+   hostname -I
+   # Ví dụ: 172.19.142.56
+   ```
+
+2. **Mở browser từ Windows:**
+   ```
+   http://<WSL2_IP>:8050
+   # Ví dụ: http://172.19.142.56:8050
+   ```
+
+3. **Hoặc từ WSL2:**
+   ```
+   http://localhost:8050
+   ```
+
+### Cấu trúc Dashboard
+
+#### Layout
+- **Header**: Tiêu đề và timestamp cập nhật cuối cùng
+- **Metrics Row**: 4 cards hiển thị key metrics (gradient backgrounds)
+- **Charts Grid**: 6 interactive charts được bố trí trong 4 rows:
+  - Row 1: 2 charts (Phân bố giá, Phân bố diện tích) - 2 cột
+  - Row 2: 1 chart (Giá trung bình theo Quận/Huyện) - full width
+  - Row 3: 2 charts (Pie charts theo mức giá và diện tích) - 2 cột
+  - Row 4: 1 chart (Scatter plot tương quan) - full width
+
+#### Data Flow
+```
+MongoDB Atlas → get_mongo_client() (connection pooling) 
+→ get_data_from_mongodb() (với caching & projection)
+→ Pandas DataFrame → Plotly Charts → Dash UI
+```
+
+#### Tối ưu hóa Performance
+- **Connection Pooling**: Reuse MongoDB connection (maxPoolSize=10)
+- **Caching**: Cache data 25 giây (CACHE_TTL) để giảm query frequency
+- **Projection**: Chỉ lấy 9 fields cần thiết (giảm data transfer ~70-80%)
+- **Batch Processing**: Xử lý data theo batch 1000 records
+
+#### Auto-refresh
+- Sử dụng `dcc.Interval` component
+- Refresh interval: 30 giây
+- Tự động fetch data mới từ MongoDB (hoặc dùng cached data nếu chưa hết hạn)
+
+### Troubleshooting Dashboard
+
+#### Lỗi: MongoDB connection failed
+```bash
+# Kiểm tra MongoDB URI trong .env
+cat .env | grep MONGODB_URI
+
+# Test connection
+python test_mongodb.py
+
+# Kiểm tra IP whitelist trong MongoDB Atlas
+# Đảm bảo WSL2 IP được thêm vào Network Access
+```
+
+#### Lỗi: Port 8050 already in use
+```bash
+# Tìm process đang dùng port 8050
+lsof -i :8050
+# hoặc
+ss -tuln | grep 8050
+
+# Kill process hoặc đổi port trong dashboard.py
+# app.run(host='0.0.0.0', port=8051)
+```
+
+#### Lỗi: No data displayed
+- Kiểm tra MongoDB có data không: `python test_mongodb.py`
+- Kiểm tra collection name trong `.env` đúng chưa
+- Xem console logs của dashboard để debug
+
+#### Dashboard không load từ Windows browser
+- Kiểm tra firewall WSL2: `sudo ufw status`
+- Kiểm tra WSL2 IP đã thay đổi chưa: `hostname -I`
+- Thử truy cập từ WSL2 localhost trước
+
+
+### Các hàm chính trong Code
+
+#### `get_mongo_client()`
+- Quản lý MongoDB connection với connection pooling
+- Tự động tạo lại connection nếu timeout (5 phút)
+- Reuse connection để giảm overhead
+
+#### `get_data_from_mongodb(use_cache=True)`
+- Lấy dữ liệu từ MongoDB với các tối ưu:
+  - Connection pooling
+  - Projection (chỉ lấy fields cần thiết)
+  - Caching (25 giây)
+  - Batch processing
+- Trả về pandas DataFrame
+
+#### `update_dashboard(n)`
+- Callback chính để cập nhật tất cả components
+- Tính toán metrics và tạo các charts
+- Xử lý trường hợp không có dữ liệu
+
+#### `create_empty_figure(message)`
+- Tạo biểu đồ trống với thông báo khi không có dữ liệu
+
+#### `get_chart_layout(title, xaxis_title, yaxis_title, height)`
+- Template layout cho tất cả charts với styling nhất quán
+
+### Tùy chỉnh Dashboard
+
+#### Thay đổi cache TTL
+Trong `dashboard.py`, tìm:
+```python
+CACHE_TTL = 25  # Cache 25 giây (làm mới mỗi 30s)
+```
+
+#### Thay đổi refresh interval
+Trong `dashboard.py`, tìm:
+```python
+dcc.Interval(
+    id='interval-component',
+    interval=30*1000,  # Cập nhật mỗi 30 giây (milliseconds)
+    n_intervals=0
+)
+```
+
+#### Thêm charts mới
+1. Thêm query trong `get_data_from_mongodb()` (nếu cần fields mới)
+2. Thêm field vào `DASHBOARD_FIELDS` projection
+3. Tạo figure mới trong `update_dashboard()` callback
+4. Thêm `dcc.Graph` vào layout
+5. Thêm `Output` vào callback decorator
+
+#### Thay đổi theme/colors
+- Sửa `dbc.themes.BOOTSTRAP` hoặc thêm custom CSS trong `app.index_string`
+- Các metric cards có gradient backgrounds được định nghĩa trong CSS
 
 ---

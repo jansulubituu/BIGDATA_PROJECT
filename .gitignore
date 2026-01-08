@@ -1,3 +1,47 @@
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
 .env
+.env.local
+
+# Logs
+*.log
+*.tmp
+
+# Data outputs (optional - uncomment if you want to ignore)
+# data_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node modules (if dashboard_frontend exists)
+dashboard_frontend/node_modules/
+node_modules/
+
+# Spark checkpoints
+/tmp/spark-checkpoints/
+spark-checkpoints/
+
+# Kafka logs
+/tmp/kafka.log
+/tmp/zookeeper.log
+
+venv/

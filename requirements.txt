@@ -3,3 +3,7 @@ kafka-python
 python-dotenv
 pyspark
 pymongo
+plotly
+dash
+dash-bootstrap-components
+pandas
