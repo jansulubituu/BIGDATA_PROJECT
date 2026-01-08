@@ -125,7 +125,166 @@ app.index_string = '''
             .text-muted {
                 color: rgba(255, 255, 255, 0.9) !important;
             }
+            /* Animation cho counter effect */
+            .counter-animate {
+                animation: countUp 1.5s ease-out;
+            }
+            @keyframes countUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            /* Animation cho charts khi load */
+            .plotly-graph-div {
+                animation: fadeInUp 0.8s ease-out;
+            }
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            /* Pulse animation cho metrics cards */
+            .metric-card-primary, .metric-card-success, .metric-card-info, .metric-card-warning {
+                animation: pulse 2s ease-in-out infinite;
+            }
+            @keyframes pulse {
+                0%, 100% {
+                    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+                }
+                50% {
+                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+                }
+            }
         </style>
+        <script>
+            // Hàm animate số đếm
+            function animateValue(element, start, end, duration, suffix = '') {
+                if (!element) return;
+                
+                let startTimestamp = null;
+                const step = (timestamp) => {
+                    if (!startTimestamp) startTimestamp = timestamp;
+                    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                    
+                    // Easing function (ease-out)
+                    const easeOut = 1 - Math.pow(1 - progress, 3);
+                    
+                    let current;
+                    if (typeof start === 'number' && typeof end === 'number') {
+                        current = Math.floor(start + (end - start) * easeOut);
+                    } else {
+                        // Cho text như "2.5 tỷ"
+                        current = end;
+                    }
+                    
+                    // Format số với dấu phẩy
+                    if (typeof current === 'number') {
+                        element.textContent = current.toLocaleString('vi-VN') + suffix;
+                    } else {
+                        element.textContent = current + suffix;
+                    }
+                    
+                    if (progress < 1) {
+                        window.requestAnimationFrame(step);
+                    } else {
+                        element.textContent = end + suffix;
+                    }
+                };
+                window.requestAnimationFrame(step);
+            }
+            
+            // Hàm để animate tất cả metrics khi page load hoặc update
+            function animateMetrics() {
+                // Animate Total Listings
+                const totalEl = document.getElementById('total-listings');
+                if (totalEl && totalEl.textContent) {
+                    const totalText = totalEl.textContent.replace(/,/g, '');
+                    const totalNum = parseInt(totalText) || 0;
+                    if (totalNum > 0) {
+                        totalEl.textContent = '0';
+                        animateValue(totalEl, 0, totalNum, 1500, '');
+                    }
+                }
+                
+                // Animate Total Districts
+                const districtsEl = document.getElementById('total-districts');
+                if (districtsEl && districtsEl.textContent) {
+                    const districtsNum = parseInt(districtsEl.textContent) || 0;
+                    if (districtsNum > 0) {
+                        districtsEl.textContent = '0';
+                        animateValue(districtsEl, 0, districtsNum, 1500, '');
+                    }
+                }
+                
+                // Animate Average Price (giữ nguyên text như "2.5 tỷ")
+                const priceEl = document.getElementById('avg-price');
+                if (priceEl && priceEl.textContent && priceEl.textContent !== '0 VNĐ') {
+                    priceEl.style.opacity = '0';
+                    priceEl.style.transform = 'translateY(20px)';
+                    setTimeout(() => {
+                        priceEl.style.transition = 'all 0.8s ease-out';
+                        priceEl.style.opacity = '1';
+                        priceEl.style.transform = 'translateY(0)';
+                    }, 100);
+                }
+                
+                // Animate Average Area
+                const areaEl = document.getElementById('avg-area');
+                if (areaEl && areaEl.textContent && areaEl.textContent !== '0 m²') {
+                    areaEl.style.opacity = '0';
+                    areaEl.style.transform = 'translateY(20px)';
+                    setTimeout(() => {
+                        areaEl.style.transition = 'all 0.8s ease-out';
+                        areaEl.style.opacity = '1';
+                        areaEl.style.transform = 'translateY(0)';
+                    }, 200);
+                }
+            }
+            
+            // Chạy animation khi DOM ready
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(animateMetrics, 500);
+            });
+            
+            // Lắng nghe sự kiện từ Dash để animate lại khi data update
+            window.addEventListener('dash_mounted', function() {
+                setTimeout(animateMetrics, 500);
+            });
+            
+            // Sử dụng MutationObserver để detect khi Dash update content
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                        const target = mutation.target;
+                        if (target.id && ['total-listings', 'avg-price', 'avg-area', 'total-districts'].includes(target.id)) {
+                            setTimeout(animateMetrics, 100);
+                        }
+                    }
+                });
+            });
+            
+            // Bắt đầu observe sau khi page load
+            setTimeout(function() {
+                const metricsContainer = document.querySelector('.mb-4');
+                if (metricsContainer) {
+                    observer.observe(metricsContainer, {
+                        childList: true,
+                        subtree: true,
+                        characterData: true
+                    });
+                }
+            }, 1000);
+        </script>
     </head>
     <body>
         {%app_entry%}
@@ -167,7 +326,7 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     html.Div([
                         html.H4("💰 Giá trung bình", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
-                        html.H2(id="avg-price", className="mb-0", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
+                        html.H2(id="avg-price", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
                     ])
                 ])
             ], className="h-100 metric-card-success")
@@ -177,7 +336,7 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     html.Div([
                         html.H4("📐 Diện tích trung bình", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
-                        html.H2(id="avg-area", className="mb-0", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
+                        html.H2(id="avg-area", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
                     ])
                 ])
             ], className="h-100 metric-card-info")
@@ -187,7 +346,7 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     html.Div([
                         html.H4("📍 Số quận/huyện", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
-                        html.H2(id="total-districts", className="mb-0", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
+                        html.H2(id="total-districts", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2.5rem", "fontWeight": "bold"})
                     ])
                 ])
             ], className="h-100 metric-card-warning")
@@ -241,7 +400,7 @@ app.layout = dbc.Container([
         ], width=6, className="mb-4"),
     ]),
     
-    # Charts Row 4: Correlation
+    # Charts Row 4: Correlation và Giá/m²
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -249,7 +408,14 @@ app.layout = dbc.Container([
                     dcc.Graph(id="price-vs-area-scatter")
                 ])
             ])
-        ], width=12, className="mb-4"),
+        ], width=6, className="mb-4"),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="price-per-m2-by-district")
+                ])
+            ])
+        ], width=6, className="mb-4"),
     ]),
     
     # Tự động làm mới
@@ -453,7 +619,8 @@ def get_chart_layout(title, xaxis_title=None, yaxis_title=None, height=400):
      Output('price-by-district', 'figure'),
      Output('price-category-pie', 'figure'),
      Output('area-category-pie', 'figure'),
-     Output('price-vs-area-scatter', 'figure')],
+     Output('price-vs-area-scatter', 'figure'),
+     Output('price-per-m2-by-district', 'figure')],
     Input('interval-component', 'n_intervals')
 )
 def update_dashboard(n):
@@ -469,7 +636,7 @@ def update_dashboard(n):
         empty_fig = create_empty_figure("Không có dữ liệu")
         return (
             "0", "0 VNĐ", "0 m²", "0", last_update,
-            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig
+            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig
         )
     
     # Tính toán các chỉ số
@@ -478,32 +645,35 @@ def update_dashboard(n):
     avg_area = df['area_m2'].mean() if 'area_m2' in df.columns and not df['area_m2'].isna().all() else 0
     total_districts = df['district'].nunique() if 'district' in df.columns else 0
     
-    # Định dạng các chỉ số
+    # Định dạng các chỉ số (thêm data attribute để JavaScript có thể animate)
     if avg_price > 1e9:
         avg_price_str = f"{avg_price/1e9:.2f} tỷ"
+        avg_price_value = avg_price/1e9
     elif avg_price > 1e6:
         avg_price_str = f"{avg_price/1e6:.0f} triệu"
+        avg_price_value = avg_price/1e6
     else:
         avg_price_str = f"{avg_price:,.0f} VNĐ"
+        avg_price_value = avg_price
     
     avg_area_str = f"{avg_area:.1f} m²" if avg_area > 0 else "0 m²"
     
-    # Price Distribution Histogram với gradient colors
+    # Price Distribution Histogram với gradient colors (đơn vị tỷ)
     if 'price' in df.columns and not df['price'].isna().all():
-        # Tạo gradient colors
-        colors = px.colors.sequential.Blues
+        # Chuyển đổi giá sang tỷ VNĐ
+        price_billion = df['price'] / 1e9
         
         price_fig = go.Figure()
         price_fig.add_trace(go.Histogram(
-            x=df['price'],
+            x=price_billion,
             nbinsx=50,
             marker=dict(
-                color=df['price'],
-                colorscale='Blues',
+                color=price_billion,
+                colorscale='Reds',
                 showscale=True,
-                colorbar=dict(title="Giá", tickformat=".0f")
+                colorbar=dict(title="Giá (Tỷ VNĐ)", tickformat=".2f")
             ),
-            hovertemplate='<b>Khoảng giá</b>: %{x:,.0f} VNĐ<br>' +
+            hovertemplate='<b>Khoảng giá</b>: %{x:.2f} tỷ VNĐ<br>' +
                          '<b>Số lượng</b>: %{y}<br>' +
                          '<extra></extra>',
             name='Phân bố giá'
@@ -512,12 +682,12 @@ def update_dashboard(n):
         price_fig.update_layout(
             **get_chart_layout(
                 '📊 Phân bố giá',
-                xaxis_title='Giá (VNĐ)',
+                xaxis_title='Giá (Tỷ VNĐ)',
                 yaxis_title='Số lượng tin đăng'
             ),
             showlegend=False
         )
-        price_fig.update_xaxes(tickformat=".0f", tickangle=-45)
+        price_fig.update_xaxes(tickformat=".2f", tickangle=-45)
     else:
         price_fig = create_empty_figure("Không có dữ liệu giá")
     
@@ -651,22 +821,25 @@ def update_dashboard(n):
     else:
         area_pie_fig = create_empty_figure("Mức diện tích không có sẵn")
     
-    # Price vs Area Scatter Plot
+    # Price vs Area Scatter Plot (đơn vị tỷ)
     if 'price' in df.columns and 'area_m2' in df.columns:
         # Filter out invalid data
         scatter_df = df[(df['price'].notna()) & (df['area_m2'].notna()) & 
-                        (df['price'] > 0) & (df['area_m2'] > 0)]
+                        (df['price'] > 0) & (df['area_m2'] > 0)].copy()
         
         if not scatter_df.empty:
+            # Chuyển đổi giá sang tỷ VNĐ
+            scatter_df['price_billion'] = scatter_df['price'] / 1e9
+            
             scatter_fig = px.scatter(
                 scatter_df,
                 x='area_m2',
-                y='price',
+                y='price_billion',
                 color='district' if 'district' in scatter_df.columns else None,
                 size='price_per_m2' if 'price_per_m2' in scatter_df.columns else None,
                 hover_data=['title'] if 'title' in scatter_df.columns else None,
                 title='📈 Tương quan Giá và Diện tích',
-                labels={'area_m2': 'Diện tích (m²)', 'price': 'Giá (VNĐ)'},
+                labels={'area_m2': 'Diện tích (m²)', 'price_billion': 'Giá (Tỷ VNĐ)'},
                 color_discrete_sequence=px.colors.qualitative.Set2,
                 size_max=20
             )
@@ -678,17 +851,17 @@ def update_dashboard(n):
                 ),
                 hovertemplate='<b>%{hovertext}</b><br>' +
                              'Diện tích: %{x:.1f} m²<br>' +
-                             'Giá: %{y:,.0f} VNĐ<br>' +
+                             'Giá: %{y:.2f} tỷ VNĐ<br>' +
                              '<extra></extra>'
             )
             
             base_layout = get_chart_layout(
                 '📈 Tương quan Giá và Diện tích',
                 xaxis_title='Diện tích (m²)',
-                yaxis_title='Giá (VNĐ)',
+                yaxis_title='Giá (Tỷ VNĐ)',
                 height=500
             )
-            base_layout['yaxis'].update(dict(tickformat=".0f"))
+            base_layout['yaxis'].update(dict(tickformat=".2f"))
             scatter_fig.update_layout(**base_layout)
             # Giới hạn legend nếu có quá nhiều quận
             if 'district' in scatter_df.columns and scatter_df['district'].nunique() > 20:
@@ -697,6 +870,54 @@ def update_dashboard(n):
             scatter_fig = create_empty_figure("Không có dữ liệu giá/diện tích hợp lệ")
     else:
         scatter_fig = create_empty_figure("Dữ liệu giá/diện tích không có sẵn")
+    
+    # Giá trên m² theo Huyện (Chart mới)
+    if 'district' in df.columns and 'price_per_m2' in df.columns:
+        # Filter valid data
+        price_per_m2_df = df[(df['price_per_m2'].notna()) & (df['price_per_m2'] > 0) & 
+                            (df['district'].notna())].copy()
+        
+        if not price_per_m2_df.empty:
+            # Tính giá trung bình trên m² theo huyện
+            district_price_per_m2 = price_per_m2_df.groupby('district').agg({
+                'price_per_m2': ['mean', 'count']
+            }).reset_index()
+            district_price_per_m2.columns = ['district', 'avg_price_per_m2', 'count']
+            district_price_per_m2 = district_price_per_m2.sort_values('avg_price_per_m2', ascending=False).head(20)
+            
+            price_per_m2_fig = go.Figure()
+            price_per_m2_fig.add_trace(go.Bar(
+                x=district_price_per_m2['district'],
+                y=district_price_per_m2['avg_price_per_m2'] / 1e6,  # Chuyển sang triệu VNĐ/m²
+                text=[f"{c}" for c in district_price_per_m2['count']],
+                textposition='outside',
+                textfont=dict(size=10, color='#2c3e50'),
+                marker=dict(
+                    color=district_price_per_m2['avg_price_per_m2'] / 1e6,
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Giá/m² (Triệu VNĐ)")
+                ),
+                hovertemplate='<b>%{x}</b><br>' +
+                             '<b>Giá trung bình/m²</b>: %{y:.1f} triệu VNĐ<br>' +
+                             '<b>Số tin đăng</b>: %{text}<br>' +
+                             '<extra></extra>',
+                name='Giá/m² trung bình'
+            ))
+            
+            base_layout = get_chart_layout(
+                '💰 Giá trên m² theo Huyện (Top 20)',
+                xaxis_title='Huyện',
+                yaxis_title='Giá trung bình/m² (Triệu VNĐ)',
+                height=500
+            )
+            base_layout['xaxis'].update(dict(tickangle=-45))
+            base_layout['showlegend'] = False
+            price_per_m2_fig.update_layout(**base_layout)
+        else:
+            price_per_m2_fig = create_empty_figure("Không có dữ liệu giá/m² hợp lệ")
+    else:
+        price_per_m2_fig = create_empty_figure("Dữ liệu giá/m² không có sẵn")
     
     return (
         f"{total:,}",
@@ -709,7 +930,8 @@ def update_dashboard(n):
         price_district_fig,
         price_pie_fig,
         area_pie_fig,
-        scatter_fig
+        scatter_fig,
+        price_per_m2_fig
     )
 
 
