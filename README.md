@@ -489,7 +489,7 @@ Welcome to
 **Lưu ý quan trọng:** Mỗi khi mở terminal mới để chạy Spark, nhớ activate venv:
 ```bash
 source ~/spark-venv/bin/activate
-```p
+```
 
 ---
 
@@ -585,6 +585,10 @@ ssh localhost
 
 **B. Cấu hình Hadoop core-site.xml:**
 ```bash
+# Tạo thư mục vĩnh viễn cho Hadoop data (QUAN TRỌNG cho WSL2)
+sudo mkdir -p /usr/local/hadoop/data
+sudo chown -R $USER:$USER /usr/local/hadoop/data
+
 # Backup file cũ
 sudo cp /usr/local/hadoop/etc/hadoop/core-site.xml /usr/local/hadoop/etc/hadoop/core-site.xml.backup
 
@@ -603,10 +607,16 @@ Nội dung file `core-site.xml`:
     </property>
     <property>
         <name>hadoop.tmp.dir</name>
-        <value>/tmp/hadoop-${user.name}</value>
+        <value>/usr/local/hadoop/data</value>
+        <description>Thư mục vĩnh viễn thay vì /tmp để tránh mất data khi tắt/bật WSL2</description>
     </property>
 </configuration>
 ```
+
+**⚠️ Lưu ý quan trọng cho WSL2:**
+- **KHÔNG dùng `/tmp`** vì thư mục này có thể bị xóa khi shutdown WSL2
+- Dùng `/usr/local/hadoop/data` để data HDFS **KHÔNG BỊ MẤT** khi tắt/bật terminal hoặc restart Windows
+- Sau khi cấu hình, chỉ cần `start-dfs.sh` (không cần format lại)
 
 **C. Kiểm tra hdfs-site.xml:**
 ```bash
@@ -634,11 +644,17 @@ hdfs namenode -format -force
 **Kết quả mong đợi:**
 ```
 ...
+INFO common.Storage: Storage directory /usr/local/hadoop/data/dfs/name has been successfully formatted.
 INFO namenode.FSImageFormatProtobuf: Image file ... saved in 0 seconds
 INFO namenode.NNStorageRetentionManager: Going to retain 1 images with txid >= 0
 INFO namenode.FSNamesystem: Stopping services started for active state
 SHUTDOWN_MSG: Shutting down NameNode at ...
 ```
+
+**✅ Lợi ích của cấu hình vĩnh viễn:**
+- **Lần đầu:** Format và start HDFS
+- **Các lần sau:** Chỉ cần `start-dfs.sh` (không cần format lại)
+- **Data trong HDFS**: Vẫn còn nguyên sau khi tắt/bật WSL2 hoặc restart Windows
 
 #### 4.2. Khởi động HDFS
 ```bash
@@ -911,7 +927,10 @@ source ~/spark-venv/bin/activate
 # Bước 2: Load biến môi trường
 source ~/.bashrc
 
-# Bước 3: Chạy Spark Streaming
+# Bước 3: Di chuyển vào địa chỉ chứa file (ví dụ)
+cd "/mnt/l/Lưu trữ và xử lý dữ liệu lớn/BIGDATA_PROJECT"
+
+# Bước 4: Chạy Spark Streaming
 spark-submit \
   --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3,org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 \
   --master local[*] \
