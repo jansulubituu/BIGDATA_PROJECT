@@ -1,6 +1,7 @@
 requests
 kafka-python
 python-dotenv
+python-dateutil
 pyspark
 pymongo
 plotly

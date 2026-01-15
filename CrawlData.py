@@ -11,9 +11,10 @@ def fetch_house_ids(limit_ids=300, region=12000, category=1000):
     """Lấy list_id từ API listing Nhà Tốt."""
     ids = set()
     per_page = 20
+    first_id = 8577
 
     for page in range(0, limit_ids // per_page + 2):
-        offset = page * per_page
+        offset = page * per_page + first_id
         url = (
             f"https://gateway.chotot.com/v1/public/ad-listing?"
             f"region_v2={region}&cg={category}&o={offset}&limit={per_page}"
@@ -36,7 +37,7 @@ def fetch_house_ids(limit_ids=300, region=12000, category=1000):
         if len(ids) >= limit_ids:
             break
 
-        time.sleep(0.3)
+        time.sleep(2)  # Tránh spam API
 
     print(f"[INFO] Lấy được {len(ids)} list_id.")
     return list(ids)

@@ -63,7 +63,7 @@ class HouseDataProducer:
             print(f"[ERROR] Failed to send ID {key}: {e}")
             return False
     
-    def crawl_and_stream(self, limit_rows=300, batch_size=10):
+    def crawl_and_stream(self, limit_rows=500, batch_size=10):
         """
         Crawl dữ liệu và stream vào Kafka theo batch
         
@@ -102,7 +102,7 @@ class HouseDataProducer:
                 self.producer.flush()
                 print(f"[INFO] Flushed batch {idx//batch_size} ({success_count}/{idx} success)")
             
-            time.sleep(0.3)  # Tránh spam API
+            time.sleep(0.5)  # Tránh spam API
         
         # Flush cuối cùng
         self.producer.flush()

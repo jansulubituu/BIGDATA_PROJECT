@@ -15,7 +15,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output
 import dash_bootstrap_components as dbc
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from functools import lru_cache
 
@@ -59,6 +59,8 @@ DASHBOARD_FIELDS = {
     'title': 1,
     'price_category': 1,
     'area_category': 1,
+    'processing_time': 1,  # Thêm để phân tích theo tháng
+    'crawl_timestamp': 1,  # Backup timestamp nếu processing_time không có
     '_id': 0  # Loại bỏ _id để giảm lượng dữ liệu truyền
 }
 
@@ -75,60 +77,362 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
+            /* Space/Universe Theme CSS Variables */
+            :root {
+                --bg-primary: #0a0a1a;
+                --bg-secondary: #0f0f2e;
+                --bg-card: #1a1a3e;
+                --bg-card-hover: #252550;
+                --border-color: #2d2d5a;
+                --text-primary: #ffffff;
+                --text-secondary: #b8c5e0;
+                --text-muted: #8b9dc4;
+                --accent-primary: #00d4ff;
+                --accent-secondary: #8b5cf6;
+                --accent-nebula: #a855f7;
+                --accent-star: #fbbf24;
+                --accent-green: #10b981;
+                --accent-orange: #f59e0b;
+                --accent-red: #ef4444;
+                --accent-blue: #3b82f6;
+                --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.5);
+                --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.6);
+                --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.7);
+                --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.8);
+                --glow-primary: 0 0 20px rgba(0, 212, 255, 0.5);
+                --glow-secondary: 0 0 20px rgba(139, 92, 246, 0.5);
+            }
+
+            /* Space Background với Stars */
             body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                background: var(--bg-primary);
+                background-image: 
+                    radial-gradient(ellipse at top, rgba(139, 92, 246, 0.15) 0%, transparent 50%),
+                    radial-gradient(ellipse at bottom right, rgba(0, 212, 255, 0.1) 0%, transparent 50%),
+                    radial-gradient(ellipse at bottom left, rgba(168, 85, 247, 0.1) 0%, transparent 50%),
+                    linear-gradient(180deg, #0a0a1a 0%, #0f0f2e 50%, #0a0a1a 100%);
                 min-height: 100vh;
                 margin: 0;
                 padding: 20px;
+                color: var(--text-primary);
+                position: relative;
+                overflow-x: hidden;
             }
-            .card {
-                border-radius: 15px;
-                box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
-                border: none;
-                overflow: hidden;
+
+            /* Stars Animation */
+            body::before {
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-image: 
+                    radial-gradient(2px 2px at 20% 30%, #fff, transparent),
+                    radial-gradient(2px 2px at 60% 70%, #fff, transparent),
+                    radial-gradient(1px 1px at 50% 50%, #fff, transparent),
+                    radial-gradient(1px 1px at 80% 10%, #fff, transparent),
+                    radial-gradient(2px 2px at 90% 60%, #fff, transparent),
+                    radial-gradient(1px 1px at 33% 80%, #fff, transparent),
+                    radial-gradient(2px 2px at 10% 90%, #fff, transparent),
+                    radial-gradient(1px 1px at 70% 20%, #fff, transparent),
+                    radial-gradient(2px 2px at 40% 40%, #fff, transparent),
+                    radial-gradient(1px 1px at 15% 50%, #fff, transparent);
+                background-repeat: repeat;
+                background-size: 200% 200%;
+                animation: twinkle 20s linear infinite;
+                pointer-events: none;
+                opacity: 0.6;
+                z-index: 0;
             }
-            .card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+
+            @keyframes twinkle {
+                0%, 100% { opacity: 0.6; }
+                50% { opacity: 1; }
             }
-            .card-body {
-                padding: 1.5rem;
+
+            /* Nebula Effect */
+            body::after {
+                content: '';
+                position: fixed;
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
+                animation: nebula 30s ease-in-out infinite;
+                pointer-events: none;
+                z-index: 0;
             }
-            .metric-card-primary {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
+
+            @keyframes nebula {
+                0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+                33% { transform: translate(5%, 5%) scale(1.1); opacity: 0.5; }
+                66% { transform: translate(-5%, -5%) scale(0.9); opacity: 0.4; }
             }
-            .metric-card-success {
-                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                color: white;
+
+            /* Ensure content is above background effects */
+            .dashboard-container {
+                position: relative;
+                z-index: 1;
             }
-            .metric-card-info {
-                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-                color: white;
-            }
-            .metric-card-warning {
-                background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-                color: white;
-            }
+
+            /* Typography với Space Theme */
             h1 {
-                color: white;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                color: var(--text-primary);
+                text-shadow: 
+                    0 0 10px rgba(0, 212, 255, 0.5),
+                    0 0 20px rgba(139, 92, 246, 0.3),
+                    0 2px 10px rgba(0, 212, 255, 0.3);
                 font-weight: 700;
                 font-size: 2.5rem;
+                letter-spacing: -0.5px;
+                background: linear-gradient(135deg, #ffffff 0%, #00d4ff 50%, #8b5cf6 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                animation: glow-text 3s ease-in-out infinite;
             }
+
+            @keyframes glow-text {
+                0%, 100% { filter: brightness(1); }
+                50% { filter: brightness(1.2); }
+            }
+
+            h2 {
+                color: var(--text-primary);
+                font-weight: 600;
+                letter-spacing: -0.3px;
+                text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+            }
+
+            /* Card Styling với Space Theme */
+            .card {
+                border-radius: 16px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                box-shadow: var(--shadow-lg), inset 0 0 20px rgba(0, 212, 255, 0.05);
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                overflow: hidden;
+                backdrop-filter: blur(10px);
+                position: relative;
+            }
+
+            .card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: radial-gradient(circle at top right, rgba(0, 212, 255, 0.1), transparent);
+                opacity: 0;
+                transition: opacity 0.3s;
+                pointer-events: none;
+            }
+
+            .card:hover {
+                transform: translateY(-4px);
+                box-shadow: var(--shadow-xl), var(--glow-primary);
+                border-color: rgba(0, 212, 255, 0.5);
+            }
+
+            .card:hover::before {
+                opacity: 1;
+            }
+
+            .card-body {
+                padding: 1.75rem;
+            }
+
+            /* Metric Cards với Space Theme */
+            .metric-card-primary {
+                background: linear-gradient(135deg, #1a1a3e 0%, #2d1b5e 100%);
+                border: 1px solid rgba(139, 92, 246, 0.4);
+                position: relative;
+                overflow: hidden;
+                box-shadow: var(--shadow-lg), inset 0 0 30px rgba(139, 92, 246, 0.1);
+            }
+
+            .metric-card-primary::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, #8b5cf6, #00d4ff);
+                box-shadow: 0 0 10px rgba(139, 92, 246, 0.8);
+            }
+
+            .metric-card-primary::after {
+                content: '⭐';
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 1.5rem;
+                opacity: 0.3;
+                animation: float 3s ease-in-out infinite;
+            }
+
+            .metric-card-success {
+                background: linear-gradient(135deg, #1a1a3e 0%, #0d3d2e 100%);
+                border: 1px solid rgba(0, 212, 255, 0.4);
+                position: relative;
+                overflow: hidden;
+                box-shadow: var(--shadow-lg), inset 0 0 30px rgba(0, 212, 255, 0.1);
+            }
+
+            .metric-card-success::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, #00d4ff, #10b981);
+                box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+            }
+
+            .metric-card-success::after {
+                content: '🌌';
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 1.5rem;
+                opacity: 0.3;
+                animation: float 3s ease-in-out infinite 0.5s;
+            }
+
+            .metric-card-info {
+                background: linear-gradient(135deg, #1a1a3e 0%, #1e2a4e 100%);
+                border: 1px solid rgba(59, 130, 246, 0.4);
+                position: relative;
+                overflow: hidden;
+                box-shadow: var(--shadow-lg), inset 0 0 30px rgba(59, 130, 246, 0.1);
+            }
+
+            .metric-card-info::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, #3b82f6, #00d4ff);
+                box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+            }
+
+            .metric-card-info::after {
+                content: '🌠';
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 1.5rem;
+                opacity: 0.3;
+                animation: float 3s ease-in-out infinite 1s;
+            }
+
+            .metric-card-warning {
+                background: linear-gradient(135deg, #1a1a3e 0%, #3d2a1e 100%);
+                border: 1px solid rgba(251, 191, 36, 0.4);
+                position: relative;
+                overflow: hidden;
+                box-shadow: var(--shadow-lg), inset 0 0 30px rgba(251, 191, 36, 0.1);
+            }
+
+            .metric-card-warning::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, #fbbf24, #f59e0b);
+                box-shadow: 0 0 10px rgba(251, 191, 36, 0.8);
+            }
+
+            .metric-card-warning::after {
+                content: '✨';
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 1.5rem;
+                opacity: 0.3;
+                animation: float 3s ease-in-out infinite 1.5s;
+            }
+
+            @keyframes float {
+                0%, 100% { transform: translateY(0) rotate(0deg); }
+                50% { transform: translateY(-10px) rotate(5deg); }
+            }
+
+            /* Chart Container với Space Theme */
             .plotly-graph-div {
-                border-radius: 10px;
-                background: white;
+                border-radius: 12px;
+                background: var(--bg-card) !important;
+                border: 1px solid var(--border-color);
+                box-shadow: inset 0 0 20px rgba(0, 212, 255, 0.05);
+                position: relative;
             }
+
+            .plotly-graph-div::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: radial-gradient(circle at top left, rgba(139, 92, 246, 0.05), transparent);
+                pointer-events: none;
+                border-radius: 12px;
+            }
+
+            /* Text Colors */
             .text-muted {
-                color: rgba(255, 255, 255, 0.9) !important;
+                color: var(--text-secondary) !important;
             }
-            /* Animation cho counter effect */
+
+            /* HR Styling */
+            hr {
+                border-color: var(--border-color);
+                opacity: 0.5;
+            }
+
+            /* Section Dividers với Space Theme */
+            .section-divider {
+                height: 2px;
+                background: linear-gradient(90deg, 
+                    transparent, 
+                    rgba(139, 92, 246, 0.3), 
+                    rgba(0, 212, 255, 0.5), 
+                    rgba(139, 92, 246, 0.3), 
+                    transparent);
+                margin: 50px 0;
+                opacity: 0.6;
+                box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+                position: relative;
+            }
+
+            .section-divider::before {
+                content: '✦';
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                color: var(--accent-primary);
+                font-size: 1.2rem;
+                background: var(--bg-primary);
+                padding: 0 10px;
+                text-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+            }
+
+            /* Animations */
             .counter-animate {
-                animation: countUp 1.5s ease-out;
+                animation: countUp 1.5s cubic-bezier(0.4, 0, 0.2, 1);
             }
+
             @keyframes countUp {
                 from {
                     opacity: 0;
@@ -139,10 +443,11 @@ app.index_string = '''
                     transform: translateY(0);
                 }
             }
-            /* Animation cho charts khi load */
+
             .plotly-graph-div {
-                animation: fadeInUp 0.8s ease-out;
+                animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1);
             }
+
             @keyframes fadeInUp {
                 from {
                     opacity: 0;
@@ -153,16 +458,144 @@ app.index_string = '''
                     transform: translateY(0);
                 }
             }
-            /* Pulse animation cho metrics cards */
-            .metric-card-primary, .metric-card-success, .metric-card-info, .metric-card-warning {
-                animation: pulse 2s ease-in-out infinite;
+
+            /* Pulse Animation - Subtle */
+            .metric-card-primary,
+            .metric-card-success,
+            .metric-card-info,
+            .metric-card-warning {
+                animation: pulse 3s ease-in-out infinite;
             }
+
             @keyframes pulse {
                 0%, 100% {
-                    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+                    box-shadow: var(--shadow-lg);
                 }
                 50% {
-                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+                    box-shadow: var(--shadow-xl);
+                }
+            }
+
+            /* Scrollbar Styling */
+            ::-webkit-scrollbar {
+                width: 10px;
+                height: 10px;
+            }
+
+            ::-webkit-scrollbar-track {
+                background: var(--bg-secondary);
+            }
+
+            ::-webkit-scrollbar-thumb {
+                background: var(--border-color);
+                border-radius: 5px;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: rgba(0, 212, 255, 0.5);
+            }
+
+            /* Loading State */
+            .dash-loading {
+                color: var(--accent-primary) !important;
+            }
+
+            /* Dashboard Container */
+            .dashboard-container {
+                max-width: 100%;
+                position: relative;
+                z-index: 1;
+            }
+
+            /* Floating Particles Effect */
+            .floating-particles {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 0;
+                overflow: hidden;
+            }
+
+            .particle {
+                position: absolute;
+                width: 2px;
+                height: 2px;
+                background: rgba(0, 212, 255, 0.5);
+                border-radius: 50%;
+                animation: float-particle 15s infinite;
+                box-shadow: 0 0 5px rgba(0, 212, 255, 0.8);
+            }
+
+            @keyframes float-particle {
+                0% {
+                    transform: translateY(100vh) translateX(0);
+                    opacity: 0;
+                }
+                10% {
+                    opacity: 1;
+                }
+                90% {
+                    opacity: 1;
+                }
+                100% {
+                    transform: translateY(-100vh) translateX(100px);
+                    opacity: 0;
+                }
+            }
+
+            /* Header Section với Space Theme */
+            .header-section {
+                background: linear-gradient(135deg, rgba(26, 26, 62, 0.9) 0%, rgba(45, 27, 94, 0.9) 100%);
+                padding: 30px;
+                border-radius: 16px;
+                border: 1px solid rgba(139, 92, 246, 0.3);
+                margin-bottom: 30px;
+                box-shadow: var(--shadow-lg), inset 0 0 30px rgba(139, 92, 246, 0.1);
+                position: relative;
+                overflow: hidden;
+            }
+
+            .header-section::before {
+                content: '';
+                position: absolute;
+                top: -50%;
+                right: -50%;
+                width: 200%;
+                height: 200%;
+                background: radial-gradient(circle, rgba(0, 212, 255, 0.1) 0%, transparent 70%);
+                animation: rotate 20s linear infinite;
+            }
+
+            @keyframes rotate {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+
+            /* Live Indicator với Space Theme */
+            .live-indicator {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                background: var(--accent-primary);
+                border-radius: 50%;
+                margin-right: 8px;
+                animation: pulse-star 2s ease-in-out infinite;
+                box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+            }
+
+            @keyframes pulse-star {
+                0%, 100% {
+                    opacity: 1;
+                    transform: scale(1);
+                    box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+                }
+                50% {
+                    opacity: 0.7;
+                    transform: scale(1.3);
+                    box-shadow: 0 0 20px rgba(0, 212, 255, 1);
                 }
             }
         </style>
@@ -299,15 +732,25 @@ app.index_string = '''
 
 # App layout
 app.layout = dbc.Container([
-    # Header
+    # Section 1: Header với Status Bar
     dbc.Row([
         dbc.Col([
-            html.H1("🏠 Dashboard Phân tích Bất động sản", className="text-center mb-2"),
-            html.P("Dữ liệu real-time từ MongoDB Atlas | Tự động làm mới mỗi 30 giây", 
-                   className="text-center text-muted mb-4"),
-            html.Div(id="last-update", className="text-center text-muted mb-4")
+            html.Div([
+                html.H1("🏠 Dashboard Phân tích Bất động sản", className="text-center mb-3"),
+                html.Div([
+                    html.Span(html.Span("●", className="live-indicator"), style={"marginRight": "8px"}),
+                    html.Span("Live", style={"color": "#a0aec0", "fontSize": "0.9rem", "marginRight": "12px"}),
+                    html.Span("|", style={"color": "#2d3748", "margin": "0 12px"}),
+                    html.Span("Dữ liệu real-time từ MongoDB Atlas", 
+                             style={"color": "#a0aec0", "fontSize": "0.9rem", "marginRight": "12px"}),
+                    html.Span("|", style={"color": "#2d3748", "margin": "0 12px"}),
+                    html.Span("Tự động làm mới mỗi 30 giây", 
+                             style={"color": "#a0aec0", "fontSize": "0.9rem"})
+                ], className="text-center mb-3"),
+                html.Div(id="last-update", className="text-center")
+            ], className="header-section")
         ], width=12)
-    ]),
+    ], className="mb-4"),
     
     # Metrics Cards with beautiful gradients
     dbc.Row([
@@ -353,7 +796,18 @@ app.layout = dbc.Container([
         ], width=3, className="mb-4"),
     ], className="mb-4"),
     
-    # Charts Row 1: Distributions
+    # Section Divider
+    html.Div(className="section-divider"),
+    
+    # Section 3: Overview Charts
+    dbc.Row([
+        dbc.Col([
+            html.H2("📊 Tổng quan Phân bố", 
+                   style={"color": "#ffffff", "marginBottom": "20px", "fontSize": "1.8rem", "fontWeight": "600"})
+        ], width=12)
+    ], className="mb-3"),
+    
+    # Row 1: Distributions
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -371,18 +825,7 @@ app.layout = dbc.Container([
         ], width=6, className="mb-4"),
     ]),
     
-    # Charts Row 2: Price by District
-    dbc.Row([
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    dcc.Graph(id="price-by-district")
-                ])
-            ])
-        ], width=12, className="mb-4"),
-    ]),
-    
-    # Charts Row 3: Category Analysis
+    # Row 2: Category Analysis
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -400,7 +843,50 @@ app.layout = dbc.Container([
         ], width=6, className="mb-4"),
     ]),
     
-    # Charts Row 4: Correlation và Giá/m²
+    # Section Divider
+    html.Div(className="section-divider"),
+    
+    # Section 4: Geographic Analysis
+    dbc.Row([
+        dbc.Col([
+            html.H2("🗺️ Phân tích theo Địa lý", 
+                   style={"color": "#ffffff", "marginBottom": "20px", "fontSize": "1.8rem", "fontWeight": "600"})
+        ], width=12)
+    ], className="mb-3"),
+    
+    # Row 1: Price by District
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="price-by-district")
+                ])
+            ])
+        ], width=12, className="mb-4"),
+    ]),
+    
+    # Row 2: Price per m² by District
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="price-per-m2-by-district")
+                ])
+            ])
+        ], width=12, className="mb-4"),
+    ]),
+    
+    # Section Divider
+    html.Div(className="section-divider"),
+    
+    # Section 5: Correlation Analysis
+    dbc.Row([
+        dbc.Col([
+            html.H2("📈 Phân tích Tương quan", 
+                   style={"color": "#ffffff", "marginBottom": "20px", "fontSize": "1.8rem", "fontWeight": "600"})
+        ], width=12)
+    ], className="mb-3"),
+    
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -408,11 +894,99 @@ app.layout = dbc.Container([
                     dcc.Graph(id="price-vs-area-scatter")
                 ])
             ])
+        ], width=12, className="mb-4"),
+    ]),
+    
+    # Section Divider
+    html.Div(className="section-divider"),
+    
+    # Section 6: Monthly Trends
+    dbc.Row([
+        dbc.Col([
+            html.H2("📅 Thống kê theo tháng", 
+                   style={"color": "white", "textAlign": "center", "marginBottom": "30px", "fontSize": "2rem"})
+        ], width=12)
+    ]),
+    
+    # Metrics Cards: So sánh tháng hiện tại vs tháng trước
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.H4("📈 Thay đổi số tin đăng", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
+                        html.H2(id="monthly-listings-change", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2rem", "fontWeight": "bold"}),
+                        html.P(id="monthly-listings-change-desc", className="mb-0 mt-2", style={"color": "rgba(255,255,255,0.9)", "fontSize": "0.9rem"})
+                    ])
+                ])
+            ], className="h-100 metric-card-primary")
+        ], width=3, className="mb-4"),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.H4("💰 Thay đổi giá trung bình", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
+                        html.H2(id="monthly-price-change", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2rem", "fontWeight": "bold"}),
+                        html.P(id="monthly-price-change-desc", className="mb-0 mt-2", style={"color": "rgba(255,255,255,0.9)", "fontSize": "0.9rem"})
+                    ])
+                ])
+            ], className="h-100 metric-card-success")
+        ], width=3, className="mb-4"),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.H4("📊 Số tháng có dữ liệu", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
+                        html.H2(id="total-months", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2rem", "fontWeight": "bold"}),
+                        html.P("Tổng số tháng đã thu thập", className="mb-0 mt-2", style={"color": "rgba(255,255,255,0.9)", "fontSize": "0.9rem"})
+                    ])
+                ])
+            ], className="h-100 metric-card-info")
+        ], width=3, className="mb-4"),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.H4("📐 Thay đổi diện tích TB", className="card-title mb-3", style={"color": "white", "fontSize": "1.1rem"}),
+                        html.H2(id="monthly-area-change", className="mb-0 counter-animate", style={"color": "white", "fontSize": "2rem", "fontWeight": "bold"}),
+                        html.P(id="monthly-area-change-desc", className="mb-0 mt-2", style={"color": "rgba(255,255,255,0.9)", "fontSize": "0.9rem"})
+                    ])
+                ])
+            ], className="h-100 metric-card-warning")
+        ], width=3, className="mb-4"),
+    ], className="mb-4"),
+    
+    # Charts Row 5: Xu hướng theo tháng
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="monthly-trend-price")
+                ])
+            ])
         ], width=6, className="mb-4"),
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
-                    dcc.Graph(id="price-per-m2-by-district")
+                    dcc.Graph(id="monthly-trend-listings")
+                ])
+            ])
+        ], width=6, className="mb-4"),
+    ]),
+    
+    # Charts Row 6: Xu hướng diện tích và giá/m² theo tháng
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="monthly-trend-area")
+                ])
+            ])
+        ], width=6, className="mb-4"),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="monthly-trend-price-per-m2")
                 ])
             ])
         ], width=6, className="mb-4"),
@@ -552,60 +1126,171 @@ def get_data_from_mongodb(use_cache=True):
 
 
 def create_empty_figure(message="Không có dữ liệu"):
-    """Tạo biểu đồ trống với thông báo"""
+    """Tạo biểu đồ trống với Space Theme"""
     fig = go.Figure()
     fig.add_annotation(
         text=message,
         xref="paper", yref="paper",
         x=0.5, y=0.5,
         showarrow=False,
-        font=dict(size=18, color="#666", family="Arial")
+        font=dict(size=18, color="#b8c5e0", family="Inter, Arial")
     )
     fig.update_layout(
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        plot_bgcolor='#f8f9fa',
-        paper_bgcolor='white',
+        plot_bgcolor='#1a1a3e',
+        paper_bgcolor='#1a1a3e',
         margin=dict(l=20, r=20, t=20, b=20)
     )
     return fig
 
 
 def get_chart_layout(title, xaxis_title=None, yaxis_title=None, height=400):
-    """Tạo template layout cho biểu đồ với styling đẹp"""
+    """Tạo template layout cho biểu đồ với Space/Universe Theme"""
     layout = dict(
         title=dict(
             text=title,
-            font=dict(size=20, family="Arial", color="#2c3e50"),
+            font=dict(size=20, family="Inter, Arial", color="#ffffff"),
             x=0.5,
-            xanchor='center'
+            xanchor='center',
+            pad=dict(t=10, b=20)
         ),
-        plot_bgcolor='#f8f9fa',
-        paper_bgcolor='white',
-        font=dict(family="Arial", size=12, color="#2c3e50"),
-        margin=dict(l=60, r=30, t=60, b=50),
+        plot_bgcolor='#1a1a3e',
+        paper_bgcolor='#1a1a3e',
+        font=dict(family="Inter, Arial", size=12, color="#b8c5e0"),
+        margin=dict(l=70, r=40, t=70, b=60),
         height=height,
         hovermode='closest',
         xaxis=dict(
-            title=xaxis_title if xaxis_title else "",
-            gridcolor='#e0e0e0',
+            title=dict(
+                text=xaxis_title if xaxis_title else "",
+                font=dict(size=13, color="#ffffff")
+            ),
+            gridcolor='#2d2d5a',
             gridwidth=1,
             showgrid=True,
             zeroline=False,
-            linecolor='#b0b0b0',
-            linewidth=1
+            linecolor='#3d3d6a',
+            linewidth=1,
+            tickfont=dict(color="#b8c5e0", size=11)
         ),
         yaxis=dict(
-            title=yaxis_title if yaxis_title else "",
-            gridcolor='#e0e0e0',
+            title=dict(
+                text=yaxis_title if yaxis_title else "",
+                font=dict(size=13, color="#ffffff")
+            ),
+            gridcolor='#2d2d5a',
             gridwidth=1,
             showgrid=True,
             zeroline=False,
-            linecolor='#b0b0b0',
-            linewidth=1
+            linecolor='#3d3d6a',
+            linewidth=1,
+            tickfont=dict(color="#b8c5e0", size=11)
+        ),
+        legend=dict(
+            bgcolor='rgba(26, 26, 62, 0.9)',
+            bordercolor='#2d2d5a',
+            borderwidth=1,
+            font=dict(color="#ffffff", size=11)
+        ),
+        hoverlabel=dict(
+            bgcolor='#0a0a1a',
+            bordercolor='#00d4ff',
+            font_size=12,
+            font_family="Inter, Arial",
+            font_color="#ffffff"
         )
     )
     return layout
+
+
+def get_monthly_stats():
+    """
+    Tính toán thống kê theo tháng từ MongoDB
+    Trả về DataFrame với các cột: month, count, avg_price, avg_area, total_districts
+    """
+    try:
+        client = get_mongo_client()
+        if client is None:
+            return pd.DataFrame()
+        
+        db = client[MONGODB_DATABASE]
+        collection = db[MONGODB_COLLECTION]
+        
+        # Tìm field timestamp có sẵn
+        sample = collection.find_one({}, {'processing_time': 1, 'crawl_timestamp': 1})
+        timestamp_field = None
+        
+        if sample:
+            if 'processing_time' in sample and sample['processing_time']:
+                timestamp_field = 'processing_time'
+            elif 'crawl_timestamp' in sample and sample['crawl_timestamp']:
+                timestamp_field = 'crawl_timestamp'
+        
+        if not timestamp_field:
+            # Không có timestamp, trả về empty
+            return pd.DataFrame()
+        
+        # Pipeline aggregation để group theo tháng
+        pipeline = [
+            {"$match": {timestamp_field: {"$exists": True, "$ne": None}}},
+            {"$project": {
+                "year_month": {
+                    "$dateToString": {
+                        "format": "%Y-%m",
+                        "date": {
+                            "$cond": {
+                                "if": {"$eq": [{"$type": f"${timestamp_field}"}, "date"]},
+                                "then": f"${timestamp_field}",
+                                "else": {
+                                    "$toDate": {
+                                        "$cond": {
+                                            "if": {"$gt": [f"${timestamp_field}", 1e12]},
+                                            "then": f"${timestamp_field}",  # milliseconds
+                                            "else": {"$multiply": [f"${timestamp_field}", 1000]}  # seconds to milliseconds
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "price": 1,
+                "area_m2": 1,
+                "district": 1
+            }},
+            {"$group": {
+                "_id": "$year_month",
+                "count": {"$sum": 1},
+                "avg_price": {"$avg": "$price"},
+                "avg_area": {"$avg": "$area_m2"},
+                "districts": {"$addToSet": "$district"}
+            }},
+            {"$sort": {"_id": 1}},
+            {"$project": {
+                "month": "$_id",
+                "count": 1,
+                "avg_price": {"$round": ["$avg_price", 0]},
+                "avg_area": {"$round": ["$avg_area", 2]},
+                "num_districts": {"$size": "$districts"}
+            }}
+        ]
+        
+        monthly_data = list(collection.aggregate(pipeline))
+        
+        if not monthly_data:
+            return pd.DataFrame()
+        
+        # Convert sang DataFrame
+        df_monthly = pd.DataFrame(monthly_data)
+        df_monthly['month'] = pd.to_datetime(df_monthly['month'] + '-01')
+        df_monthly = df_monthly.sort_values('month')
+        
+        return df_monthly
+        
+    except Exception as e:
+        print(f"❌ Lỗi khi tính thống kê theo tháng: {e}")
+        return pd.DataFrame()
 
 
 @app.callback(
@@ -620,7 +1305,19 @@ def get_chart_layout(title, xaxis_title=None, yaxis_title=None, height=400):
      Output('price-category-pie', 'figure'),
      Output('area-category-pie', 'figure'),
      Output('price-vs-area-scatter', 'figure'),
-     Output('price-per-m2-by-district', 'figure')],
+     Output('price-per-m2-by-district', 'figure'),
+     # Monthly stats outputs
+     Output('monthly-listings-change', 'children'),
+     Output('monthly-listings-change-desc', 'children'),
+     Output('monthly-price-change', 'children'),
+     Output('monthly-price-change-desc', 'children'),
+     Output('total-months', 'children'),
+     Output('monthly-area-change', 'children'),
+     Output('monthly-area-change-desc', 'children'),
+     Output('monthly-trend-price', 'figure'),
+     Output('monthly-trend-listings', 'figure'),
+     Output('monthly-trend-area', 'figure'),
+     Output('monthly-trend-price-per-m2', 'figure')],
     Input('interval-component', 'n_intervals')
 )
 def update_dashboard(n):
@@ -634,9 +1331,13 @@ def update_dashboard(n):
     # Nếu không có dữ liệu, trả về giá trị trống
     if df.empty:
         empty_fig = create_empty_figure("Không có dữ liệu")
+        empty_monthly_fig = create_empty_figure("Chưa có dữ liệu")
         return (
             "0", "0 VNĐ", "0 m²", "0", last_update,
-            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig
+            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig,
+            # Monthly stats (empty)
+            "N/A", "Chưa có dữ liệu", "N/A", "Chưa có dữ liệu", "0", "N/A", "Chưa có dữ liệu",
+            empty_monthly_fig, empty_monthly_fig, empty_monthly_fig, empty_monthly_fig
         )
     
     # Tính toán các chỉ số
@@ -658,7 +1359,7 @@ def update_dashboard(n):
     
     avg_area_str = f"{avg_area:.1f} m²" if avg_area > 0 else "0 m²"
     
-    # Price Distribution Histogram với gradient colors (đơn vị tỷ)
+    # Price Distribution Histogram với dark theme colorscale
     if 'price' in df.columns and not df['price'].isna().all():
         # Chuyển đổi giá sang tỷ VNĐ
         price_billion = df['price'] / 1e9
@@ -669,9 +1370,16 @@ def update_dashboard(n):
             nbinsx=50,
             marker=dict(
                 color=price_billion,
-                colorscale='Reds',
+                colorscale='Bluyl',  # Dark-friendly colorscale
                 showscale=True,
-                colorbar=dict(title="Giá (Tỷ VNĐ)", tickformat=".2f")
+                colorbar=dict(
+                    title=dict(text="Giá (Tỷ VNĐ)", font=dict(color="#ffffff", size=12)),
+                    tickformat=".2f",
+                    tickfont=dict(color="#b8c5e0", size=10),
+                    bgcolor='rgba(26, 35, 50, 0.8)',
+                    bordercolor='#2d3748',
+                    borderwidth=1
+                )
             ),
             hovertemplate='<b>Khoảng giá</b>: %{x:.2f} tỷ VNĐ<br>' +
                          '<b>Số lượng</b>: %{y}<br>' +
@@ -687,11 +1395,12 @@ def update_dashboard(n):
             ),
             showlegend=False
         )
-        price_fig.update_xaxes(tickformat=".2f", tickangle=-45)
+        price_fig.update_xaxes(tickformat=".2f", tickangle=-45, tickfont=dict(color="#b8c5e0"))
+        price_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
     else:
         price_fig = create_empty_figure("Không có dữ liệu giá")
     
-    # Area Distribution Histogram với gradient colors
+    # Area Distribution Histogram với dark theme colorscale
     if 'area_m2' in df.columns and not df['area_m2'].isna().all():
         area_fig = go.Figure()
         area_fig.add_trace(go.Histogram(
@@ -699,9 +1408,15 @@ def update_dashboard(n):
             nbinsx=50,
             marker=dict(
                 color=df['area_m2'],
-                colorscale='Greens',
+                colorscale='Cividis',  # Dark-friendly colorscale
                 showscale=True,
-                colorbar=dict(title="Diện tích (m²)")
+                colorbar=dict(
+                    title=dict(text="Diện tích (m²)", font=dict(color="#ffffff", size=12)),
+                    tickfont=dict(color="#b8c5e0", size=10),
+                    bgcolor='rgba(26, 35, 50, 0.8)',
+                    bordercolor='#2d3748',
+                    borderwidth=1
+                )
             ),
             hovertemplate='<b>Khoảng diện tích</b>: %{x:.1f} m²<br>' +
                          '<b>Số lượng</b>: %{y}<br>' +
@@ -717,10 +1432,12 @@ def update_dashboard(n):
             ),
             showlegend=False
         )
+        area_fig.update_xaxes(tickfont=dict(color="#b8c5e0"))
+        area_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
     else:
         area_fig = create_empty_figure("Không có dữ liệu diện tích")
     
-    # Price by District Bar Chart với gradient
+    # Price by District Bar Chart với dark theme gradient
     if 'district' in df.columns and 'price' in df.columns and not df['price'].isna().all():
         district_stats = df.groupby('district').agg({
             'price': ['mean', 'count']
@@ -734,12 +1451,18 @@ def update_dashboard(n):
             y=district_stats['avg_price']/1e9,
             text=[f"{c}" for c in district_stats['count']],
             textposition='outside',
-            textfont=dict(size=10, color='#2c3e50'),
+            textfont=dict(size=10, color='#ffffff'),
             marker=dict(
                 color=district_stats['avg_price']/1e9,
-                colorscale='Oranges',
+                colorscale='Plasma',  # Dark-friendly colorscale
                 showscale=True,
-                colorbar=dict(title="Giá (Tỷ VNĐ)")
+                colorbar=dict(
+                    title=dict(text="Giá (Tỷ VNĐ)", font=dict(color="#ffffff", size=12)),
+                    tickfont=dict(color="#b8c5e0", size=10),
+                    bgcolor='rgba(26, 35, 50, 0.8)',
+                    bordercolor='#2d3748',
+                    borderwidth=1
+                )
             ),
             hovertemplate='<b>%{x}</b><br>' +
                          '<b>Giá trung bình</b>: %{y:.2f} tỷ VNĐ<br>' +
@@ -755,73 +1478,98 @@ def update_dashboard(n):
             height=500
         )
         # Cập nhật xaxis với tickangle
-        base_layout['xaxis'].update(dict(tickangle=-45))
+        base_layout['xaxis'].update(dict(tickangle=-45, tickfont=dict(color="#b8c5e0")))
+        base_layout['yaxis'].update(dict(tickfont=dict(color="#b8c5e0")))
         base_layout['showlegend'] = False
         price_district_fig.update_layout(**base_layout)
     else:
         price_district_fig = create_empty_figure("Không có dữ liệu quận/giá")
     
-    # Price Category Pie Chart với donut style
+    # Price Category Pie Chart với dark-friendly colors
     if 'price_category' in df.columns:
         price_cat_counts = df['price_category'].value_counts()
         if not price_cat_counts.empty:
+            # Dark-friendly color palette
+            dark_colors = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
             price_pie_fig = go.Figure(data=[go.Pie(
                 labels=price_cat_counts.index,
                 values=price_cat_counts.values,
                 hole=0.4,  # Donut chart
                 marker=dict(
-                    colors=px.colors.qualitative.Set3,
-                    line=dict(color='#FFFFFF', width=2)
+                    colors=dark_colors[:len(price_cat_counts)],
+                    line=dict(color='#1a1a3e', width=2)
                 ),
                 textinfo='label+percent',
                 textposition='outside',
+                textfont=dict(color='#ffffff', size=11),
                 hovertemplate='<b>%{label}</b><br>' +
                              '<b>Số lượng</b>: %{value}<br>' +
                              '<b>Tỷ lệ</b>: %{percent}<br>' +
                              '<extra></extra>'
             )])
             
-            price_pie_fig.update_layout(
-                **get_chart_layout('💰 Phân bố theo Mức giá'),
-                showlegend=True,
-                legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.1)
-            )
+            base_layout = get_chart_layout('💰 Phân bố theo Mức giá')
+            base_layout['showlegend'] = True
+            base_layout['legend'].update(dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="left",
+                x=1.1,
+                font=dict(color="#ffffff", size=11),
+                bgcolor='rgba(26, 26, 62, 0.9)',
+                bordercolor='#2d2d5a',
+                borderwidth=1
+            ))
+            price_pie_fig.update_layout(**base_layout)
         else:
             price_pie_fig = create_empty_figure("Không có dữ liệu mức giá")
     else:
         price_pie_fig = create_empty_figure("Mức giá không có sẵn")
     
-    # Area Category Pie Chart với donut style
+    # Area Category Pie Chart với dark-friendly colors
     if 'area_category' in df.columns:
         area_cat_counts = df['area_category'].value_counts()
         if not area_cat_counts.empty:
+            # Dark-friendly color palette (different shades)
+            dark_colors_area = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#7c3aed', '#00d4ff']
             area_pie_fig = go.Figure(data=[go.Pie(
                 labels=area_cat_counts.index,
                 values=area_cat_counts.values,
                 hole=0.4,  # Donut chart
                 marker=dict(
-                    colors=px.colors.qualitative.Pastel,
-                    line=dict(color='#FFFFFF', width=2)
+                    colors=dark_colors_area[:len(area_cat_counts)],
+                    line=dict(color='#1a1a3e', width=2)
                 ),
                 textinfo='label+percent',
                 textposition='outside',
+                textfont=dict(color='#ffffff', size=11),
                 hovertemplate='<b>%{label}</b><br>' +
                              '<b>Số lượng</b>: %{value}<br>' +
                              '<b>Tỷ lệ</b>: %{percent}<br>' +
                              '<extra></extra>'
             )])
             
-            area_pie_fig.update_layout(
-                **get_chart_layout('📐 Phân bố theo Mức diện tích'),
-                showlegend=True,
-                legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.1)
-            )
+            base_layout = get_chart_layout('📐 Phân bố theo Mức diện tích')
+            base_layout['showlegend'] = True
+            base_layout['legend'].update(dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="left",
+                x=1.1,
+                font=dict(color="#ffffff", size=11),
+                bgcolor='rgba(26, 26, 62, 0.9)',
+                bordercolor='#2d2d5a',
+                borderwidth=1
+            ))
+            area_pie_fig.update_layout(**base_layout)
         else:
             area_pie_fig = create_empty_figure("Không có dữ liệu mức diện tích")
     else:
         area_pie_fig = create_empty_figure("Mức diện tích không có sẵn")
     
-    # Price vs Area Scatter Plot (đơn vị tỷ)
+    # Price vs Area Scatter Plot (đơn vị tỷ) - Sử dụng go.Scatter để tránh lỗi
     if 'price' in df.columns and 'area_m2' in df.columns:
         # Filter out invalid data
         scatter_df = df[(df['price'].notna()) & (df['area_m2'].notna()) & 
@@ -831,29 +1579,52 @@ def update_dashboard(n):
             # Chuyển đổi giá sang tỷ VNĐ
             scatter_df['price_billion'] = scatter_df['price'] / 1e9
             
-            scatter_fig = px.scatter(
-                scatter_df,
-                x='area_m2',
-                y='price_billion',
-                color='district' if 'district' in scatter_df.columns else None,
-                size='price_per_m2' if 'price_per_m2' in scatter_df.columns else None,
-                hover_data=['title'] if 'title' in scatter_df.columns else None,
-                title='📈 Tương quan Giá và Diện tích',
-                labels={'area_m2': 'Diện tích (m²)', 'price_billion': 'Giá (Tỷ VNĐ)'},
-                color_discrete_sequence=px.colors.qualitative.Set2,
-                size_max=20
-            )
+            # Dark-friendly color sequence
+            dark_color_sequence = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#06b6d4']
             
-            scatter_fig.update_traces(
-                marker=dict(
-                    line=dict(width=0.5, color='white'),
-                    opacity=0.7
-                ),
-                hovertemplate='<b>%{hovertext}</b><br>' +
-                             'Diện tích: %{x:.1f} m²<br>' +
-                             'Giá: %{y:.2f} tỷ VNĐ<br>' +
-                             '<extra></extra>'
-            )
+            scatter_fig = go.Figure()
+            
+            # Nếu có district và số lượng district hợp lý, group theo district
+            if 'district' in scatter_df.columns and scatter_df['district'].nunique() <= 20:
+                districts = scatter_df['district'].unique()
+                for i, district in enumerate(districts[:len(dark_color_sequence)]):
+                    district_data = scatter_df[scatter_df['district'] == district]
+                    scatter_fig.add_trace(go.Scatter(
+                        x=district_data['area_m2'],
+                        y=district_data['price_billion'],
+                        mode='markers',
+                        name=str(district),
+                        marker=dict(
+                            color=dark_color_sequence[i % len(dark_color_sequence)],
+                            size=8,
+                            line=dict(width=0.5, color='#1a1a3e'),
+                            opacity=0.8
+                        ),
+                        hovertemplate='<b>%{text}</b><br>' +
+                                     'Diện tích: %{x:.1f} m²<br>' +
+                                     'Giá: %{y:.2f} tỷ VNĐ<br>' +
+                                     '<extra></extra>',
+                        text=district_data['title'].tolist() if 'title' in district_data.columns else None
+                    ))
+            else:
+                # Không group theo district, hiển thị tất cả với một màu
+                scatter_fig.add_trace(go.Scatter(
+                    x=scatter_df['area_m2'],
+                    y=scatter_df['price_billion'],
+                    mode='markers',
+                    name='Tất cả',
+                    marker=dict(
+                        color=dark_color_sequence[0],
+                        size=8,
+                        line=dict(width=0.5, color='#1a1a3e'),
+                        opacity=0.8
+                    ),
+                    hovertemplate='<b>%{text}</b><br>' +
+                                 'Diện tích: %{x:.1f} m²<br>' +
+                                 'Giá: %{y:.2f} tỷ VNĐ<br>' +
+                                 '<extra></extra>',
+                    text=scatter_df['title'].tolist() if 'title' in scatter_df.columns else None
+                ))
             
             base_layout = get_chart_layout(
                 '📈 Tương quan Giá và Diện tích',
@@ -861,11 +1632,16 @@ def update_dashboard(n):
                 yaxis_title='Giá (Tỷ VNĐ)',
                 height=500
             )
-            base_layout['yaxis'].update(dict(tickformat=".2f"))
+            base_layout['yaxis'].update(dict(tickformat=".2f", tickfont=dict(color="#b8c5e0")))
+            base_layout['xaxis'].update(dict(tickfont=dict(color="#b8c5e0")))
+            
+            # Chỉ hiển thị legend nếu có nhiều districts
+            if 'district' in scatter_df.columns and scatter_df['district'].nunique() <= 20:
+                base_layout['showlegend'] = True
+            else:
+                base_layout['showlegend'] = False
+            
             scatter_fig.update_layout(**base_layout)
-            # Giới hạn legend nếu có quá nhiều quận
-            if 'district' in scatter_df.columns and scatter_df['district'].nunique() > 20:
-                scatter_fig.update_layout(showlegend=False)
         else:
             scatter_fig = create_empty_figure("Không có dữ liệu giá/diện tích hợp lệ")
     else:
@@ -891,12 +1667,18 @@ def update_dashboard(n):
                 y=district_price_per_m2['avg_price_per_m2'] / 1e6,  # Chuyển sang triệu VNĐ/m²
                 text=[f"{c}" for c in district_price_per_m2['count']],
                 textposition='outside',
-                textfont=dict(size=10, color='#2c3e50'),
+                textfont=dict(size=10, color='#ffffff'),
                 marker=dict(
                     color=district_price_per_m2['avg_price_per_m2'] / 1e6,
-                    colorscale='Viridis',
+                    colorscale='Turbo',  # Dark-friendly colorscale
                     showscale=True,
-                    colorbar=dict(title="Giá/m² (Triệu VNĐ)")
+                    colorbar=dict(
+                        title=dict(text="Giá/m² (Triệu VNĐ)", font=dict(color="#ffffff", size=12)),
+                        tickfont=dict(color="#b8c5e0", size=10),
+                        bgcolor='rgba(26, 35, 50, 0.8)',
+                        bordercolor='#2d3748',
+                        borderwidth=1
+                    )
                 ),
                 hovertemplate='<b>%{x}</b><br>' +
                              '<b>Giá trung bình/m²</b>: %{y:.1f} triệu VNĐ<br>' +
@@ -911,13 +1693,177 @@ def update_dashboard(n):
                 yaxis_title='Giá trung bình/m² (Triệu VNĐ)',
                 height=500
             )
-            base_layout['xaxis'].update(dict(tickangle=-45))
+            base_layout['xaxis'].update(dict(tickangle=-45, tickfont=dict(color="#b8c5e0")))
+            base_layout['yaxis'].update(dict(tickfont=dict(color="#b8c5e0")))
             base_layout['showlegend'] = False
             price_per_m2_fig.update_layout(**base_layout)
         else:
             price_per_m2_fig = create_empty_figure("Không có dữ liệu giá/m² hợp lệ")
     else:
         price_per_m2_fig = create_empty_figure("Dữ liệu giá/m² không có sẵn")
+    
+    # ========== THỐNG KÊ THEO THÁNG ==========
+    df_monthly = get_monthly_stats()
+    
+    # Metrics: So sánh tháng hiện tại vs tháng trước
+    if not df_monthly.empty and len(df_monthly) >= 2:
+        current_month = df_monthly.iloc[-1]
+        previous_month = df_monthly.iloc[-2]
+        
+        # Thay đổi số tin đăng
+        listings_change = current_month['count'] - previous_month['count']
+        listings_change_pct = (listings_change / previous_month['count'] * 100) if previous_month['count'] > 0 else 0
+        listings_change_str = f"{listings_change:+,}" if listings_change != 0 else "0"
+        listings_change_desc = f"vs tháng trước ({previous_month['month'].strftime('%m/%Y')})"
+        if listings_change_pct != 0:
+            listings_change_desc += f" ({listings_change_pct:+.1f}%)"
+        
+        # Thay đổi giá trung bình
+        price_change = current_month['avg_price'] - previous_month['avg_price']
+        price_change_pct = (price_change / previous_month['avg_price'] * 100) if previous_month['avg_price'] > 0 else 0
+        if abs(price_change) > 1e9:
+            price_change_str = f"{price_change/1e9:+.2f} tỷ"
+        elif abs(price_change) > 1e6:
+            price_change_str = f"{price_change/1e6:+.0f} triệu"
+        else:
+            price_change_str = f"{price_change:+,.0f} VNĐ"
+        price_change_desc = f"vs tháng trước ({previous_month['month'].strftime('%m/%Y')})"
+        if price_change_pct != 0:
+            price_change_desc += f" ({price_change_pct:+.1f}%)"
+        
+        # Thay đổi diện tích trung bình
+        area_change = current_month['avg_area'] - previous_month['avg_area']
+        area_change_pct = (area_change / previous_month['avg_area'] * 100) if previous_month['avg_area'] > 0 else 0
+        area_change_str = f"{area_change:+.1f} m²" if area_change != 0 else "0 m²"
+        area_change_desc = f"vs tháng trước ({previous_month['month'].strftime('%m/%Y')})"
+        if area_change_pct != 0:
+            area_change_desc += f" ({area_change_pct:+.1f}%)"
+        
+        total_months = len(df_monthly)
+    else:
+        listings_change_str = "N/A"
+        listings_change_desc = "Chưa đủ dữ liệu (cần ít nhất 2 tháng)"
+        price_change_str = "N/A"
+        price_change_desc = "Chưa đủ dữ liệu"
+        area_change_str = "N/A"
+        area_change_desc = "Chưa đủ dữ liệu"
+        total_months = len(df_monthly) if not df_monthly.empty else 0
+    
+    # Biểu đồ xu hướng giá theo tháng
+    if not df_monthly.empty:
+        # Xu hướng giá với accent colors
+        monthly_price_fig = go.Figure()
+        monthly_price_fig.add_trace(go.Scatter(
+            x=df_monthly['month'],
+            y=df_monthly['avg_price'] / 1e9,  # Convert to tỷ
+            mode='lines+markers',
+            name='Giá trung bình',
+            line=dict(color='#00d4ff', width=3),
+            marker=dict(size=8, color='#7c3aed'),
+            hovertemplate='<b>Tháng</b>: %{x|%m/%Y}<br>' +
+                         '<b>Giá TB</b>: %{y:.2f} tỷ VNĐ<br>' +
+                         '<extra></extra>'
+        ))
+        monthly_price_fig.update_layout(
+            **get_chart_layout(
+                '📈 Xu hướng Giá trung bình theo tháng',
+                xaxis_title='Tháng',
+                yaxis_title='Giá trung bình (Tỷ VNĐ)',
+                height=400
+            )
+        )
+        monthly_price_fig.update_xaxes(tickfont=dict(color="#b8c5e0"))
+        monthly_price_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
+        
+        # Xu hướng số lượng tin đăng với dark colorscale
+        monthly_listings_fig = go.Figure()
+        monthly_listings_fig.add_trace(go.Bar(
+            x=df_monthly['month'],
+            y=df_monthly['count'],
+            name='Số tin đăng',
+            marker=dict(
+                color=df_monthly['count'],
+                colorscale='Bluyl',  # Dark-friendly colorscale
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="Số lượng", font=dict(color="#ffffff", size=12)),
+                    tickfont=dict(color="#b8c5e0", size=10),
+                    bgcolor='rgba(26, 35, 50, 0.8)',
+                    bordercolor='#2d3748',
+                    borderwidth=1
+                )
+            ),
+            hovertemplate='<b>Tháng</b>: %{x|%m/%Y}<br>' +
+                         '<b>Số tin đăng</b>: %{y:,}<br>' +
+                         '<extra></extra>'
+        ))
+        monthly_listings_fig.update_layout(
+            **get_chart_layout(
+                '📊 Xu hướng Số lượng tin đăng theo tháng',
+                xaxis_title='Tháng',
+                yaxis_title='Số lượng tin đăng',
+                height=400
+            )
+        )
+        monthly_listings_fig.update_xaxes(tickfont=dict(color="#b8c5e0"))
+        monthly_listings_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
+        
+        # Xu hướng diện tích trung bình với accent colors
+        monthly_area_fig = go.Figure()
+        monthly_area_fig.add_trace(go.Scatter(
+            x=df_monthly['month'],
+            y=df_monthly['avg_area'],
+            mode='lines+markers',
+            name='Diện tích TB',
+            line=dict(color='#10b981', width=3),
+            marker=dict(size=8, color='#3b82f6'),
+            hovertemplate='<b>Tháng</b>: %{x|%m/%Y}<br>' +
+                         '<b>Diện tích TB</b>: %{y:.1f} m²<br>' +
+                         '<extra></extra>'
+        ))
+        monthly_area_fig.update_layout(
+            **get_chart_layout(
+                '📐 Xu hướng Diện tích trung bình theo tháng',
+                xaxis_title='Tháng',
+                yaxis_title='Diện tích trung bình (m²)',
+                height=400
+            )
+        )
+        monthly_area_fig.update_xaxes(tickfont=dict(color="#b8c5e0"))
+        monthly_area_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
+        
+        # Xu hướng giá/m² (tính từ avg_price / avg_area)
+        if 'avg_price' in df_monthly.columns and 'avg_area' in df_monthly.columns:
+            df_monthly['avg_price_per_m2'] = df_monthly['avg_price'] / df_monthly['avg_area']
+            monthly_price_per_m2_fig = go.Figure()
+            monthly_price_per_m2_fig.add_trace(go.Scatter(
+                x=df_monthly['month'],
+                y=df_monthly['avg_price_per_m2'] / 1e6,  # Convert to triệu VNĐ/m²
+                mode='lines+markers',
+                name='Giá/m² TB',
+                line=dict(color='#f59e0b', width=3),
+                marker=dict(size=8, color='#ef4444'),
+                hovertemplate='<b>Tháng</b>: %{x|%m/%Y}<br>' +
+                             '<b>Giá/m² TB</b>: %{y:.2f} triệu VNĐ/m²<br>' +
+                             '<extra></extra>'
+            ))
+            monthly_price_per_m2_fig.update_layout(
+                **get_chart_layout(
+                    '💰 Xu hướng Giá/m² trung bình theo tháng',
+                    xaxis_title='Tháng',
+                    yaxis_title='Giá/m² trung bình (Triệu VNĐ)',
+                    height=400
+                )
+            )
+            monthly_price_per_m2_fig.update_xaxes(tickfont=dict(color="#b8c5e0"))
+            monthly_price_per_m2_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
+        else:
+            monthly_price_per_m2_fig = create_empty_figure("Không có dữ liệu giá/m² theo tháng")
+    else:
+        monthly_price_fig = create_empty_figure("Chưa có dữ liệu theo tháng")
+        monthly_listings_fig = create_empty_figure("Chưa có dữ liệu theo tháng")
+        monthly_area_fig = create_empty_figure("Chưa có dữ liệu theo tháng")
+        monthly_price_per_m2_fig = create_empty_figure("Chưa có dữ liệu theo tháng")
     
     return (
         f"{total:,}",
@@ -931,7 +1877,19 @@ def update_dashboard(n):
         price_pie_fig,
         area_pie_fig,
         scatter_fig,
-        price_per_m2_fig
+        price_per_m2_fig,
+        # Monthly stats
+        listings_change_str,
+        listings_change_desc,
+        price_change_str,
+        price_change_desc,
+        f"{total_months}",
+        area_change_str,
+        area_change_desc,
+        monthly_price_fig,
+        monthly_listings_fig,
+        monthly_area_fig,
+        monthly_price_per_m2_fig
     )
 
 
