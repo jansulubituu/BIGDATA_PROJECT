@@ -84,6 +84,9 @@ cleaned_df = parsed_df \
     .filter(col("area_m2").isNotNull()) \
     .filter(col("area_m2") > 0) \
     .withColumn("processing_time", current_timestamp()) \
+    .withColumn("category", 
+                when((col("category") == 1030) & (col("price") > 300000000), 1020)
+                .otherwise(col("category"))) \
     .withColumn("price_billion", round(col("price") / 1000000000, 2)) \
     .withColumn("price_category", 
                 when(col("price") < 1000000000, "< 1 tỷ")
@@ -95,7 +98,22 @@ cleaned_df = parsed_df \
                 when(col("area_m2") < 50, "< 50m²")
                 .when(col("area_m2") < 100, "50-100m²")
                 .when(col("area_m2") < 200, "100-200m²")
-                .otherwise("> 200m²"))
+                .otherwise("> 200m²")) \
+    .withColumn("rental_category",
+                when(col("category") == 1050,
+                     when(col("price") < 3000000, "< 3 triệu")
+                     .when(col("price") < 5000000, "3-5 triệu")
+                     .when(col("price") < 10000000, "5-10 triệu")
+                     .when(col("price") < 20000000, "10-20 triệu")
+                     .otherwise("> 20 triệu"))
+                .when(col("category") == 1030,
+                     when(col("price") < 10000000, "< 10 triệu")
+                        .when(col("price") < 20000000, "10-20 triệu")
+                        .when(col("price") < 50000000, "20-50 triệu")
+                        .when(col("price") < 100000000, "50-100 triệu")
+                        .when(col("price") < 200000000, "100-200 triệu")
+                        .otherwise("> 200 triệu"))
+                .otherwise(None))
 
 print("[INFO] Data cleaning configured")
 

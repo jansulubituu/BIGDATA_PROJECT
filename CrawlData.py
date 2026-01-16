@@ -11,7 +11,7 @@ def fetch_house_ids(limit_ids=300, region=12000, category=1000):
     """Lấy list_id từ API listing Nhà Tốt."""
     ids = set()
     per_page = 20
-    first_id = 8577
+    first_id = 2999
 
     for page in range(0, limit_ids // per_page + 2):
         offset = page * per_page + first_id

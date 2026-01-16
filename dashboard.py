@@ -1,7 +1,7 @@
 """
 Dashboard Dữ liệu Bất động sản
 Visualization cho dữ liệu bất động sản từ MongoDB Atlas
-Dashboard real-time với tự động làm mới mỗi 30 giây
+Dashboard real-time với tự động làm mới mỗi 5 phút
 """
 
 import os
@@ -46,7 +46,7 @@ MONGO_CLIENT_TIMEOUT = 300  # 5 phút
 # Cấu hình cache
 _cache_data = None
 _cache_timestamp = 0
-CACHE_TTL = 25  # Cache 25 giây (làm mới mỗi 30s)
+CACHE_TTL = 300  # Cache 5 phút (làm mới mỗi 5 phút)
 
 # Các trường cần thiết cho dashboard (projection để tối ưu)
 DASHBOARD_FIELDS = {
@@ -59,6 +59,8 @@ DASHBOARD_FIELDS = {
     'title': 1,
     'price_category': 1,
     'area_category': 1,
+    'rental_category': 1,
+    'category': 1,  # Thêm để lọc theo category trong dropdown
     'processing_time': 1,  # Thêm để phân tích theo tháng
     'crawl_timestamp': 1,  # Backup timestamp nếu processing_time không có
     '_id': 0  # Loại bỏ _id để giảm lượng dữ liệu truyền
@@ -598,6 +600,30 @@ app.index_string = '''
                     box-shadow: 0 0 20px rgba(0, 212, 255, 1);
                 }
             }
+
+            .custom-dropdown .Select-control {
+                background-color: #1a1a3e !important;
+                border: 1px solid #2d2d5a !important;
+            }
+
+            .custom-dropdown .Select-menu-outer {
+                background-color: #1a1a3e !important;
+                color: #f1f1f5 !important;
+            }
+
+            .custom-dropdown .Select-option {
+                background-color: #1a1a3e !important;
+                color: #f1f1f5 !important;
+            }
+
+            .custom-dropdown .Select-option.is-focused {
+                background-color: #2d2d5a !important;
+            }
+
+            .custom-dropdown .Select-value-label {
+                color: #f1f1f5 !important;
+            }
+
         </style>
         <script>
             // Hàm animate số đếm
@@ -744,12 +770,47 @@ app.layout = dbc.Container([
                     html.Span("Dữ liệu real-time từ MongoDB Atlas", 
                              style={"color": "#a0aec0", "fontSize": "0.9rem", "marginRight": "12px"}),
                     html.Span("|", style={"color": "#2d3748", "margin": "0 12px"}),
-                    html.Span("Tự động làm mới mỗi 30 giây", 
+                    html.Span("Tự động làm mới mỗi 5 phút", 
                              style={"color": "#a0aec0", "fontSize": "0.9rem"})
                 ], className="text-center mb-3"),
                 html.Div(id="last-update", className="text-center")
             ], className="header-section")
         ], width=12)
+    ], className="mb-4"),
+
+    dbc.Row([
+        dbc.Col([
+            html.Label("Lọc theo Category:", style={"color": "#b8b8d1", "marginBottom": "6px", "fontSize": "0.85rem"}),
+            dcc.Dropdown(
+                id='category-filter',
+                options=[],  # Sẽ được cập nhật động
+                value=None,  # Giá trị mặc định
+                placeholder="Tất cả categories",
+                style={
+                    "backgroundColor": "#1a1a3e",
+                    "color": "#f1f1f5",
+                    "border": "1px solid #2d2d5a",
+                    "borderRadius": "8px"
+                },
+                className="custom-dropdown"
+            )
+        ], width=3),
+        dbc.Col([
+            html.Label("Lọc theo khu vực:", style={"color": "#b8b8d1", "marginBottom": "6px", "fontSize": "0.85rem"}),
+            dcc.Dropdown(
+                id='region-filter',
+                options=[],  # Sẽ được cập nhật động
+                value=None,  # Giá trị mặc định
+                placeholder="Tất cả khu vực",
+                style={
+                    "backgroundColor": "#1a1a3e",
+                    "color": "#f1f1f5",
+                    "border": "1px solid #2d2d5a",
+                    "borderRadius": "8px"
+                },
+                className="custom-dropdown"
+            )
+        ], width=3),
     ], className="mb-4"),
     
     # Metrics Cards with beautiful gradients
@@ -850,8 +911,12 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             html.H2("🗺️ Phân tích theo Địa lý", 
-                   style={"color": "#ffffff", "marginBottom": "20px", "fontSize": "1.8rem", "fontWeight": "600"})
-        ], width=12)
+                   style={"color": "#f1f1f5",
+                        "marginBottom": "20px",
+                        "fontSize": "1.8rem",
+                        "fontWeight": "600",
+                        "letterSpacing": "0.5px"})
+        ], width=9),
     ], className="mb-3"),
     
     # Row 1: Price by District
@@ -995,7 +1060,7 @@ app.layout = dbc.Container([
     # Tự động làm mới
     dcc.Interval(
         id='interval-component',
-        interval=30*1000,  # Cập nhật mỗi 30 giây
+        interval=5*60*1000,  # Cập nhật mỗi 5 phút
         n_intervals=0
     ),
     
@@ -1294,6 +1359,40 @@ def get_monthly_stats():
 
 
 @app.callback(
+    Output('category-filter', 'options'),
+    [Input('interval-component', 'n_intervals')]
+)
+def update_category_options(n):
+    """Cập nhật danh sách categories cho dropdown"""
+    df = get_data_from_mongodb()
+    
+    if df.empty or 'category' not in df.columns:
+        return []
+    
+    # Map category ID to tên có ý nghĩa
+    category_names = {
+        1010: "Căn hộ, Chung cư",
+        1020: "Nhà ở",
+        1030: "Cho thuê kinh doanh",
+        1040: "Đất",
+        1050: "Nhà trọ"
+    }
+    
+    # Lấy danh sách unique categories và sắp xếp
+    categories = df['category'].dropna().unique()
+    categories = sorted(categories)
+    
+    # Tạo options cho dropdown với tên có ý nghĩa
+    options = []
+    for cat in categories:
+        cat_int = int(cat)
+        label = category_names.get(cat_int, f"Category {cat_int}")
+        options.append({'label': label, 'value': cat_int})
+    
+    return options
+
+
+@app.callback(
     [Output('total-listings', 'children'),
      Output('avg-price', 'children'),
      Output('avg-area', 'children'),
@@ -1318,18 +1417,39 @@ def get_monthly_stats():
      Output('monthly-trend-listings', 'figure'),
      Output('monthly-trend-area', 'figure'),
      Output('monthly-trend-price-per-m2', 'figure')],
-    Input('interval-component', 'n_intervals')
+    [Input('interval-component', 'n_intervals'),
+     Input('category-filter', 'value')]
 )
-def update_dashboard(n):
-    """Callback để cập nhật tất cả các components"""
+def update_dashboard(n, selected_category):
+    """Callback để cập nhật tất cả các components với filter theo category"""
     df = get_data_from_mongodb()
+    
+    # Áp dụng filter theo category nếu có
+    df_filtered = df.copy()
+    category_label = ""
+    is_rental = False  # Biến để kiểm tra có phải nhà cho thuê không
+    
+    if selected_category is not None and 'category' in df.columns:
+        df_filtered = df[df['category'] == selected_category].copy()
+        # Map category ID to tên
+        category_names = {
+            1010: "Căn hộ, Chung cư",
+            1020: "Nhà ở",
+            1030: "Cho thuê kinh doanh",
+            1040: "Đất",
+            1050: "Nhà trọ"
+        }
+        category_label = category_names.get(int(selected_category), f"Category {selected_category}")
+        is_rental = (int(selected_category) == 1050 or int(selected_category) == 1030)  # Đánh dấu nếu là nhà cho thuê
     
     # Cập nhật timestamp
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     last_update = f"Cập nhật lần cuối: {current_time}"
+    if selected_category is not None:
+        last_update += f" | Lọc: {category_label}"
     
     # Nếu không có dữ liệu, trả về giá trị trống
-    if df.empty:
+    if df_filtered.empty:
         empty_fig = create_empty_figure("Không có dữ liệu")
         empty_monthly_fig = create_empty_figure("Chưa có dữ liệu")
         return (
@@ -1340,14 +1460,18 @@ def update_dashboard(n):
             empty_monthly_fig, empty_monthly_fig, empty_monthly_fig, empty_monthly_fig
         )
     
-    # Tính toán các chỉ số
-    total = len(df)
-    avg_price = df['price'].mean() if 'price' in df.columns and not df['price'].isna().all() else 0
-    avg_area = df['area_m2'].mean() if 'area_m2' in df.columns and not df['area_m2'].isna().all() else 0
-    total_districts = df['district'].nunique() if 'district' in df.columns else 0
+    # Tính toán các chỉ số (sử dụng df_filtered)
+    total = len(df_filtered)
+    avg_price = df_filtered['price'].mean() if 'price' in df_filtered.columns and not df_filtered['price'].isna().all() else 0
+    avg_area = df_filtered['area_m2'].mean() if 'area_m2' in df_filtered.columns and not df_filtered['area_m2'].isna().all() else 0
+    total_districts = df_filtered['district'].nunique() if 'district' in df_filtered.columns else 0
     
     # Định dạng các chỉ số (thêm data attribute để JavaScript có thể animate)
-    if avg_price > 1e9:
+    # Nếu là nhà cho thuê (category 1050), luôn hiển thị bằng triệu
+    if is_rental:
+        avg_price_str = f"{avg_price/1e6:.2f} triệu"
+        avg_price_value = avg_price/1e6
+    elif avg_price > 1e9:
         avg_price_str = f"{avg_price/1e9:.2f} tỷ"
         avg_price_value = avg_price/1e9
     elif avg_price > 1e6:
@@ -1360,28 +1484,35 @@ def update_dashboard(n):
     avg_area_str = f"{avg_area:.1f} m²" if avg_area > 0 else "0 m²"
     
     # Price Distribution Histogram với dark theme colorscale
-    if 'price' in df.columns and not df['price'].isna().all():
-        # Chuyển đổi giá sang tỷ VNĐ
-        price_billion = df['price'] / 1e9
+    if 'price' in df_filtered.columns and not df_filtered['price'].isna().all():
+        # Chuyển đổi giá: triệu nếu là nhà cho thuê, tỷ nếu không
+        if is_rental:
+            price_converted = df_filtered['price'] / 1e6
+            price_unit = "Triệu VNĐ"
+            price_format = ".1f"
+        else:
+            price_converted = df_filtered['price'] / 1e9
+            price_unit = "Tỷ VNĐ"
+            price_format = ".2f"
         
         price_fig = go.Figure()
         price_fig.add_trace(go.Histogram(
-            x=price_billion,
+            x=price_converted,
             nbinsx=50,
             marker=dict(
-                color=price_billion,
+                color=price_converted,
                 colorscale='Bluyl',  # Dark-friendly colorscale
                 showscale=True,
                 colorbar=dict(
-                    title=dict(text="Giá (Tỷ VNĐ)", font=dict(color="#ffffff", size=12)),
-                    tickformat=".2f",
+                    title=dict(text=f"Giá ({price_unit})", font=dict(color="#ffffff", size=12)),
+                    tickformat=price_format,
                     tickfont=dict(color="#b8c5e0", size=10),
                     bgcolor='rgba(26, 35, 50, 0.8)',
                     bordercolor='#2d3748',
                     borderwidth=1
                 )
             ),
-            hovertemplate='<b>Khoảng giá</b>: %{x:.2f} tỷ VNĐ<br>' +
+            hovertemplate=f'<b>Khoảng giá</b>: %{{x:{price_format}}} {price_unit}<br>' +
                          '<b>Số lượng</b>: %{y}<br>' +
                          '<extra></extra>',
             name='Phân bố giá'
@@ -1390,24 +1521,24 @@ def update_dashboard(n):
         price_fig.update_layout(
             **get_chart_layout(
                 '📊 Phân bố giá',
-                xaxis_title='Giá (Tỷ VNĐ)',
+                xaxis_title=f'Giá ({price_unit})',
                 yaxis_title='Số lượng tin đăng'
             ),
             showlegend=False
         )
-        price_fig.update_xaxes(tickformat=".2f", tickangle=-45, tickfont=dict(color="#b8c5e0"))
+        price_fig.update_xaxes(tickformat=price_format, tickangle=-45, tickfont=dict(color="#b8c5e0"))
         price_fig.update_yaxes(tickfont=dict(color="#b8c5e0"))
     else:
         price_fig = create_empty_figure("Không có dữ liệu giá")
     
     # Area Distribution Histogram với dark theme colorscale
-    if 'area_m2' in df.columns and not df['area_m2'].isna().all():
+    if 'area_m2' in df_filtered.columns and not df_filtered['area_m2'].isna().all():
         area_fig = go.Figure()
         area_fig.add_trace(go.Histogram(
-            x=df['area_m2'],
+            x=df_filtered['area_m2'],
             nbinsx=50,
             marker=dict(
-                color=df['area_m2'],
+                color=df_filtered['area_m2'],
                 colorscale='Cividis',  # Dark-friendly colorscale
                 showscale=True,
                 colorbar=dict(
@@ -1438,26 +1569,36 @@ def update_dashboard(n):
         area_fig = create_empty_figure("Không có dữ liệu diện tích")
     
     # Price by District Bar Chart với dark theme gradient
-    if 'district' in df.columns and 'price' in df.columns and not df['price'].isna().all():
-        district_stats = df.groupby('district').agg({
+    if 'district' in df_filtered.columns and 'price' in df_filtered.columns and not df_filtered['price'].isna().all():
+        district_stats = df_filtered.groupby('district').agg({
             'price': ['mean', 'count']
         }).reset_index()
         district_stats.columns = ['district', 'avg_price', 'count']
         district_stats = district_stats.sort_values('avg_price', ascending=False).head(20)
         
+        # Chuyển đổi giá: triệu nếu là nhà cho thuê, tỷ nếu không
+        if is_rental:
+            district_stats['price_display'] = district_stats['avg_price'] / 1e6
+            price_unit = "Triệu VNĐ"
+            price_format = ".1f"
+        else:
+            district_stats['price_display'] = district_stats['avg_price'] / 1e9
+            price_unit = "Tỷ VNĐ"
+            price_format = ".2f"
+        
         price_district_fig = go.Figure()
         price_district_fig.add_trace(go.Bar(
             x=district_stats['district'],
-            y=district_stats['avg_price']/1e9,
+            y=district_stats['price_display'],
             text=[f"{c}" for c in district_stats['count']],
             textposition='outside',
             textfont=dict(size=10, color='#ffffff'),
             marker=dict(
-                color=district_stats['avg_price']/1e9,
+                color=district_stats['price_display'],
                 colorscale='Plasma',  # Dark-friendly colorscale
                 showscale=True,
                 colorbar=dict(
-                    title=dict(text="Giá (Tỷ VNĐ)", font=dict(color="#ffffff", size=12)),
+                    title=dict(text=f"Giá ({price_unit})", font=dict(color="#ffffff", size=12)),
                     tickfont=dict(color="#b8c5e0", size=10),
                     bgcolor='rgba(26, 35, 50, 0.8)',
                     bordercolor='#2d3748',
@@ -1465,7 +1606,7 @@ def update_dashboard(n):
                 )
             ),
             hovertemplate='<b>%{x}</b><br>' +
-                         '<b>Giá trung bình</b>: %{y:.2f} tỷ VNĐ<br>' +
+                         f'<b>Giá trung bình</b>: %{{y:{price_format}}} {price_unit}<br>' +
                          '<b>Số tin đăng</b>: %{text}<br>' +
                          '<extra></extra>',
             name='Giá trung bình'
@@ -1474,7 +1615,7 @@ def update_dashboard(n):
         base_layout = get_chart_layout(
             '🏘️ Giá trung bình theo Quận/Huyện (Top 20)',
             xaxis_title='Quận/Huyện',
-            yaxis_title='Giá trung bình (Tỷ VNĐ)',
+            yaxis_title=f'Giá trung bình ({price_unit})',
             height=500
         )
         # Cập nhật xaxis với tickangle
@@ -1486,8 +1627,47 @@ def update_dashboard(n):
         price_district_fig = create_empty_figure("Không có dữ liệu quận/giá")
     
     # Price Category Pie Chart với dark-friendly colors
-    if 'price_category' in df.columns:
-        price_cat_counts = df['price_category'].value_counts()
+    # Nếu là nhà cho thuê (category 1050), hiển thị phân bổ theo rental_category
+    if is_rental and 'rental_category' in df_filtered.columns:
+        rental_cat_counts = df_filtered['rental_category'].value_counts()
+        if not rental_cat_counts.empty:
+            # Dark-friendly color palette
+            dark_colors = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
+            price_pie_fig = go.Figure(data=[go.Pie(
+                labels=rental_cat_counts.index,
+                values=rental_cat_counts.values,
+                hole=0.4,  # Donut chart
+                marker=dict(
+                    colors=dark_colors[:len(rental_cat_counts)],
+                    line=dict(color='#1a1a3e', width=2)
+                ),
+                textinfo='label+percent',
+                textposition='outside',
+                textfont=dict(color='#ffffff', size=11),
+                hovertemplate='<b>%{label}</b><br>' +
+                             '<b>Số lượng</b>: %{value}<br>' +
+                             '<b>Tỷ lệ</b>: %{percent}<br>' +
+                             '<extra></extra>'
+            )])
+            
+            base_layout = get_chart_layout('🏠 Phân bố theo Mức thuê')
+            base_layout['showlegend'] = True
+            base_layout['legend'].update(dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="left",
+                x=1.1,
+                font=dict(color="#ffffff", size=11),
+                bgcolor='rgba(26, 26, 62, 0.9)',
+                bordercolor='#2d2d5a',
+                borderwidth=1
+            ))
+            price_pie_fig.update_layout(**base_layout)
+        else:
+            price_pie_fig = create_empty_figure("Không có dữ liệu mức thuê")
+    elif 'price_category' in df_filtered.columns:
+        price_cat_counts = df_filtered['price_category'].value_counts()
         if not price_cat_counts.empty:
             # Dark-friendly color palette
             dark_colors = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6']
@@ -1528,8 +1708,8 @@ def update_dashboard(n):
         price_pie_fig = create_empty_figure("Mức giá không có sẵn")
     
     # Area Category Pie Chart với dark-friendly colors
-    if 'area_category' in df.columns:
-        area_cat_counts = df['area_category'].value_counts()
+    if 'area_category' in df_filtered.columns:
+        area_cat_counts = df_filtered['area_category'].value_counts()
         if not area_cat_counts.empty:
             # Dark-friendly color palette (different shades)
             dark_colors_area = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#7c3aed', '#00d4ff']
@@ -1569,15 +1749,22 @@ def update_dashboard(n):
     else:
         area_pie_fig = create_empty_figure("Mức diện tích không có sẵn")
     
-    # Price vs Area Scatter Plot (đơn vị tỷ) - Sử dụng go.Scatter để tránh lỗi
-    if 'price' in df.columns and 'area_m2' in df.columns:
+    # Price vs Area Scatter Plot - Sử dụng go.Scatter để tránh lỗi
+    if 'price' in df_filtered.columns and 'area_m2' in df_filtered.columns:
         # Filter out invalid data
-        scatter_df = df[(df['price'].notna()) & (df['area_m2'].notna()) & 
-                        (df['price'] > 0) & (df['area_m2'] > 0)].copy()
+        scatter_df = df_filtered[(df_filtered['price'].notna()) & (df_filtered['area_m2'].notna()) & 
+                        (df_filtered['price'] > 0) & (df_filtered['area_m2'] > 0)].copy()
         
         if not scatter_df.empty:
-            # Chuyển đổi giá sang tỷ VNĐ
-            scatter_df['price_billion'] = scatter_df['price'] / 1e9
+            # Chuyển đổi giá: triệu nếu là nhà cho thuê, tỷ nếu không
+            if is_rental:
+                scatter_df['price_display'] = scatter_df['price'] / 1e6
+                price_unit = "Triệu VNĐ"
+                price_format = ".1f"
+            else:
+                scatter_df['price_display'] = scatter_df['price'] / 1e9
+                price_unit = "Tỷ VNĐ"
+                price_format = ".2f"
             
             # Dark-friendly color sequence
             dark_color_sequence = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#06b6d4']
@@ -1591,7 +1778,7 @@ def update_dashboard(n):
                     district_data = scatter_df[scatter_df['district'] == district]
                     scatter_fig.add_trace(go.Scatter(
                         x=district_data['area_m2'],
-                        y=district_data['price_billion'],
+                        y=district_data['price_display'],
                         mode='markers',
                         name=str(district),
                         marker=dict(
@@ -1602,7 +1789,7 @@ def update_dashboard(n):
                         ),
                         hovertemplate='<b>%{text}</b><br>' +
                                      'Diện tích: %{x:.1f} m²<br>' +
-                                     'Giá: %{y:.2f} tỷ VNĐ<br>' +
+                                     f'Giá: %{{y:{price_format}}} {price_unit}<br>' +
                                      '<extra></extra>',
                         text=district_data['title'].tolist() if 'title' in district_data.columns else None
                     ))
@@ -1610,7 +1797,7 @@ def update_dashboard(n):
                 # Không group theo district, hiển thị tất cả với một màu
                 scatter_fig.add_trace(go.Scatter(
                     x=scatter_df['area_m2'],
-                    y=scatter_df['price_billion'],
+                    y=scatter_df['price_display'],
                     mode='markers',
                     name='Tất cả',
                     marker=dict(
@@ -1621,7 +1808,7 @@ def update_dashboard(n):
                     ),
                     hovertemplate='<b>%{text}</b><br>' +
                                  'Diện tích: %{x:.1f} m²<br>' +
-                                 'Giá: %{y:.2f} tỷ VNĐ<br>' +
+                                 f'Giá: %{{y:{price_format}}} {price_unit}<br>' +
                                  '<extra></extra>',
                     text=scatter_df['title'].tolist() if 'title' in scatter_df.columns else None
                 ))
@@ -1629,10 +1816,10 @@ def update_dashboard(n):
             base_layout = get_chart_layout(
                 '📈 Tương quan Giá và Diện tích',
                 xaxis_title='Diện tích (m²)',
-                yaxis_title='Giá (Tỷ VNĐ)',
+                yaxis_title=f'Giá ({price_unit})',
                 height=500
             )
-            base_layout['yaxis'].update(dict(tickformat=".2f", tickfont=dict(color="#b8c5e0")))
+            base_layout['yaxis'].update(dict(tickformat=price_format, tickfont=dict(color="#b8c5e0")))
             base_layout['xaxis'].update(dict(tickfont=dict(color="#b8c5e0")))
             
             # Chỉ hiển thị legend nếu có nhiều districts
@@ -1647,11 +1834,11 @@ def update_dashboard(n):
     else:
         scatter_fig = create_empty_figure("Dữ liệu giá/diện tích không có sẵn")
     
-    # Giá trên m² theo Huyện (Chart mới)
-    if 'district' in df.columns and 'price_per_m2' in df.columns:
+    # Giá trên m² theo Huyện (Chart mới) - Sử dụng df_filtered
+    if 'district' in df_filtered.columns and 'price_per_m2' in df_filtered.columns:
         # Filter valid data
-        price_per_m2_df = df[(df['price_per_m2'].notna()) & (df['price_per_m2'] > 0) & 
-                            (df['district'].notna())].copy()
+        price_per_m2_df = df_filtered[(df_filtered['price_per_m2'].notna()) & (df_filtered['price_per_m2'] > 0) & 
+                            (df_filtered['district'].notna())].copy()
         
         if not price_per_m2_df.empty:
             # Tính giá trung bình trên m² theo huyện
@@ -1721,7 +1908,10 @@ def update_dashboard(n):
         # Thay đổi giá trung bình
         price_change = current_month['avg_price'] - previous_month['avg_price']
         price_change_pct = (price_change / previous_month['avg_price'] * 100) if previous_month['avg_price'] > 0 else 0
-        if abs(price_change) > 1e9:
+        # Nếu là nhà cho thuê, luôn hiển thị bằng triệu
+        if is_rental:
+            price_change_str = f"{price_change/1e6:+.2f} triệu"
+        elif abs(price_change) > 1e9:
             price_change_str = f"{price_change/1e9:+.2f} tỷ"
         elif abs(price_change) > 1e6:
             price_change_str = f"{price_change/1e6:+.0f} triệu"
@@ -1751,24 +1941,34 @@ def update_dashboard(n):
     
     # Biểu đồ xu hướng giá theo tháng
     if not df_monthly.empty:
+        # Chuyển đổi giá: triệu nếu là nhà cho thuê, tỷ nếu không
+        if is_rental:
+            monthly_price_display = df_monthly['avg_price'] / 1e6
+            price_unit = "Triệu VNĐ"
+            price_format = ".1f"
+        else:
+            monthly_price_display = df_monthly['avg_price'] / 1e9
+            price_unit = "Tỷ VNĐ"
+            price_format = ".2f"
+        
         # Xu hướng giá với accent colors
         monthly_price_fig = go.Figure()
         monthly_price_fig.add_trace(go.Scatter(
             x=df_monthly['month'],
-            y=df_monthly['avg_price'] / 1e9,  # Convert to tỷ
+            y=monthly_price_display,
             mode='lines+markers',
             name='Giá trung bình',
             line=dict(color='#00d4ff', width=3),
             marker=dict(size=8, color='#7c3aed'),
             hovertemplate='<b>Tháng</b>: %{x|%m/%Y}<br>' +
-                         '<b>Giá TB</b>: %{y:.2f} tỷ VNĐ<br>' +
+                         f'<b>Giá TB</b>: %{{y:{price_format}}} {price_unit}<br>' +
                          '<extra></extra>'
         ))
         monthly_price_fig.update_layout(
             **get_chart_layout(
                 '📈 Xu hướng Giá trung bình theo tháng',
                 xaxis_title='Tháng',
-                yaxis_title='Giá trung bình (Tỷ VNĐ)',
+                yaxis_title=f'Giá trung bình ({price_unit})',
                 height=400
             )
         )
@@ -1903,7 +2103,7 @@ if __name__ == '__main__':
     print(f"   - Từ Windows: http://<WSL2_IP>:8050")
     print(f"   (Lấy WSL2 IP: hostname -I)")
     print("="*80)
-    print("⏳ Tự động làm mới mỗi 30 giây")
+    print("⏳ Tự động làm mới mỗi 5 phút")
     print("Nhấn Ctrl+C để dừng")
     print("="*80)
     

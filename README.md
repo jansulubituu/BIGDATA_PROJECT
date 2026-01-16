@@ -1491,6 +1491,25 @@ Sử dụng:
 ./stop_all.sh
 ```
 
+## Khôi phục dữ liệu 
+Bật tất cả các service 
+
+### Script khôi phục
+```bash
+# Activate virtual environment
+source ~/spark-venv/bin/activate
+
+# Di chuyển vào thư mục project
+cd "/mnt/l/Lưu trữ và xử lý dữ liệu lớn/BIGDATA_PROJECT"
+
+# Chạy script
+spark-submit \
+  --packages org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 \
+  --master local[*] \
+  --driver-memory 2g \
+  restore_from_hdfs.py
+```
+
 ---
 
 ### ✅ Checklist Stream Processing
