@@ -795,22 +795,6 @@ app.layout = dbc.Container([
                 className="custom-dropdown"
             )
         ], width=3),
-        dbc.Col([
-            html.Label("Lọc theo khu vực:", style={"color": "#b8b8d1", "marginBottom": "6px", "fontSize": "0.85rem"}),
-            dcc.Dropdown(
-                id='region-filter',
-                options=[],  # Sẽ được cập nhật động
-                value=None,  # Giá trị mặc định
-                placeholder="Tất cả khu vực",
-                style={
-                    "backgroundColor": "#1a1a3e",
-                    "color": "#f1f1f5",
-                    "border": "1px solid #2d2d5a",
-                    "borderRadius": "8px"
-                },
-                className="custom-dropdown"
-            )
-        ], width=3),
     ], className="mb-4"),
     
     # Metrics Cards with beautiful gradients
@@ -876,14 +860,17 @@ app.layout = dbc.Container([
                     dcc.Graph(id="price-distribution")
                 ])
             ])
-        ], width=6, className="mb-4"),
+        ], width=12, className="mb-4"),
+    ]),
+
+    dbc.Row([
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
                     dcc.Graph(id="area-distribution")
                 ])
             ])
-        ], width=6, className="mb-4"),
+        ], width=12, className="mb-4"),
     ]),
     
     # Row 2: Category Analysis
@@ -902,6 +889,17 @@ app.layout = dbc.Container([
                 ])
             ])
         ], width=6, className="mb-4"),
+    ]),
+    
+    # Row 3: Category Count Bar Chart
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    dcc.Graph(id="category-count-bar")
+                ])
+            ])
+        ], width=12, className="mb-4"),
     ]),
     
     # Section Divider
@@ -1282,19 +1280,8 @@ def get_monthly_stats():
         db = client[MONGODB_DATABASE]
         collection = db[MONGODB_COLLECTION]
         
-        # Tìm field timestamp có sẵn
-        sample = collection.find_one({}, {'processing_time': 1, 'crawl_timestamp': 1})
-        timestamp_field = None
-        
-        if sample:
-            if 'processing_time' in sample and sample['processing_time']:
-                timestamp_field = 'processing_time'
-            elif 'crawl_timestamp' in sample and sample['crawl_timestamp']:
-                timestamp_field = 'crawl_timestamp'
-        
-        if not timestamp_field:
-            # Không có timestamp, trả về empty
-            return pd.DataFrame()
+        # Sử dụng field post_time (milliseconds timestamp)
+        timestamp_field = 'post_time'
         
         # Pipeline aggregation để group theo tháng
         pipeline = [
@@ -1303,21 +1290,7 @@ def get_monthly_stats():
                 "year_month": {
                     "$dateToString": {
                         "format": "%Y-%m",
-                        "date": {
-                            "$cond": {
-                                "if": {"$eq": [{"$type": f"${timestamp_field}"}, "date"]},
-                                "then": f"${timestamp_field}",
-                                "else": {
-                                    "$toDate": {
-                                        "$cond": {
-                                            "if": {"$gt": [f"${timestamp_field}", 1e12]},
-                                            "then": f"${timestamp_field}",  # milliseconds
-                                            "else": {"$multiply": [f"${timestamp_field}", 1000]}  # seconds to milliseconds
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        "date": {"$toDate": f"${timestamp_field}"}  # post_time đã ở dạng milliseconds
                     }
                 },
                 "price": 1,
@@ -1373,21 +1346,27 @@ def update_category_options(n):
     category_names = {
         1010: "Căn hộ, Chung cư",
         1020: "Nhà ở",
-        1030: "Cho thuê kinh doanh",
+        1030: "Cho thuê kinh doanh, văn phòng",
         1040: "Đất",
-        1050: "Nhà trọ"
+        1050: "Cho thuê cư trú"
     }
     
     # Lấy danh sách unique categories và sắp xếp
     categories = df['category'].dropna().unique()
+    # Chuyển đổi tất cả về int trước khi sort để tránh lỗi so sánh str vs int
+    categories = []
+    for cat in df['category'].dropna().unique():
+        try:
+            categories.append(int(cat))
+        except (ValueError, TypeError):
+            pass  # Bỏ qua các giá trị không convert được
     categories = sorted(categories)
     
     # Tạo options cho dropdown với tên có ý nghĩa
     options = []
     for cat in categories:
-        cat_int = int(cat)
-        label = category_names.get(cat_int, f"Category {cat_int}")
-        options.append({'label': label, 'value': cat_int})
+        label = category_names.get(cat, f"Category {cat}")
+        options.append({'label': label, 'value': cat})
     
     return options
 
@@ -1405,6 +1384,7 @@ def update_category_options(n):
      Output('area-category-pie', 'figure'),
      Output('price-vs-area-scatter', 'figure'),
      Output('price-per-m2-by-district', 'figure'),
+     Output('category-count-bar', 'figure'),
      # Monthly stats outputs
      Output('monthly-listings-change', 'children'),
      Output('monthly-listings-change-desc', 'children'),
@@ -1435,9 +1415,9 @@ def update_dashboard(n, selected_category):
         category_names = {
             1010: "Căn hộ, Chung cư",
             1020: "Nhà ở",
-            1030: "Cho thuê kinh doanh",
+            1030: "Cho thuê kinh doanh, văn phòng",
             1040: "Đất",
-            1050: "Nhà trọ"
+            1050: "Cho thuê cư trú"
         }
         category_label = category_names.get(int(selected_category), f"Category {selected_category}")
         is_rental = (int(selected_category) == 1050 or int(selected_category) == 1030)  # Đánh dấu nếu là nhà cho thuê
@@ -1454,7 +1434,7 @@ def update_dashboard(n, selected_category):
         empty_monthly_fig = create_empty_figure("Chưa có dữ liệu")
         return (
             "0", "0 VNĐ", "0 m²", "0", last_update,
-            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig,
+            empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig,
             # Monthly stats (empty)
             "N/A", "Chưa có dữ liệu", "N/A", "Chưa có dữ liệu", "0", "N/A", "Chưa có dữ liệu",
             empty_monthly_fig, empty_monthly_fig, empty_monthly_fig, empty_monthly_fig
@@ -1574,6 +1554,8 @@ def update_dashboard(n, selected_category):
             'price': ['mean', 'count']
         }).reset_index()
         district_stats.columns = ['district', 'avg_price', 'count']
+        # Lọc các huyện có số lượng tin > 50
+        district_stats = district_stats[district_stats['count'] > 50]
         district_stats = district_stats.sort_values('avg_price', ascending=False).head(20)
         
         # Chuyển đổi giá: triệu nếu là nhà cho thuê, tỷ nếu không
@@ -1846,6 +1828,8 @@ def update_dashboard(n, selected_category):
                 'price_per_m2': ['mean', 'count']
             }).reset_index()
             district_price_per_m2.columns = ['district', 'avg_price_per_m2', 'count']
+            # Lọc các huyện có số lượng tin > 50
+            district_price_per_m2 = district_price_per_m2[district_price_per_m2['count'] > 50]
             district_price_per_m2 = district_price_per_m2.sort_values('avg_price_per_m2', ascending=False).head(20)
             
             price_per_m2_fig = go.Figure()
@@ -1875,7 +1859,7 @@ def update_dashboard(n, selected_category):
             ))
             
             base_layout = get_chart_layout(
-                '💰 Giá trên m² theo Huyện (Top 20)',
+                '💰 Giá trên m² theo Quận/Huyện (Top 20)',
                 xaxis_title='Huyện',
                 yaxis_title='Giá trung bình/m² (Triệu VNĐ)',
                 height=500
@@ -1888,6 +1872,67 @@ def update_dashboard(n, selected_category):
             price_per_m2_fig = create_empty_figure("Không có dữ liệu giá/m² hợp lệ")
     else:
         price_per_m2_fig = create_empty_figure("Dữ liệu giá/m² không có sẵn")
+    
+    # Category Count Bar Chart - Số lượng tin theo từng category
+    if 'category' in df.columns:  # Sử dụng df gốc (không filter) để hiển thị tất cả categories
+        category_counts = df.groupby('category').size().reset_index(name='count')
+        category_counts = category_counts.sort_values('count', ascending=False)
+        
+        # Map category ID to tên có ý nghĩa
+        category_names = {
+            1010: "Căn hộ, Chung cư",
+            1020: "Nhà ở",
+            1030: "Cho thuê kinh doanh, văn phòng",
+            1040: "Đất",
+            1050: "Cho thuê cư trú"
+        }
+        
+        category_counts['category_name'] = category_counts['category'].apply(
+            lambda x: category_names.get(int(x), f"Category {x}") if pd.notna(x) else "Unknown"
+        )
+        
+        # Dark-friendly color palette
+        dark_colors = ['#00d4ff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6']
+        
+        category_count_fig = go.Figure()
+        category_count_fig.add_trace(go.Bar(
+            x=category_counts['category_name'],
+            y=category_counts['count'],
+            text=category_counts['count'],
+            textposition='outside',
+            textfont=dict(size=12, color='#ffffff'),
+            marker=dict(
+                color=category_counts['count'],
+                colorscale='Viridis',  # Dark-friendly colorscale
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="Số lượng", font=dict(color="#ffffff", size=12)),
+                    tickfont=dict(color="#b8c5e0", size=10),
+                    bgcolor='rgba(26, 35, 50, 0.8)',
+                    bordercolor='#2d3748',
+                    borderwidth=1
+                )
+            ),
+            hovertemplate='<b>%{x}</b><br>' +
+                         '<b>Số lượng tin</b>: %{y:,}<br>' +
+                         '<b>Tỷ lệ</b>: %{customdata:.1f}%<br>' +
+                         '<extra></extra>',
+            customdata=[(count/category_counts['count'].sum()*100) for count in category_counts['count']],
+            name='Số lượng tin'
+        ))
+        
+        base_layout = get_chart_layout(
+            '📊 Số lượng tin đăng theo Category',
+            xaxis_title='Category',
+            yaxis_title='Số lượng tin đăng',
+            height=450
+        )
+        base_layout['xaxis'].update(dict(tickangle=-45, tickfont=dict(color="#b8c5e0", size=11)))
+        base_layout['yaxis'].update(dict(tickfont=dict(color="#b8c5e0")))
+        base_layout['showlegend'] = False
+        category_count_fig.update_layout(**base_layout)
+    else:
+        category_count_fig = create_empty_figure("Dữ liệu category không có sẵn")
     
     # ========== THỐNG KÊ THEO THÁNG ==========
     df_monthly = get_monthly_stats()
@@ -2078,6 +2123,7 @@ def update_dashboard(n, selected_category):
         area_pie_fig,
         scatter_fig,
         price_per_m2_fig,
+        category_count_fig,
         # Monthly stats
         listings_change_str,
         listings_change_desc,

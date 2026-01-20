@@ -11,7 +11,7 @@ def fetch_house_ids(limit_ids=300, region=12000, category=1000):
     """Lấy list_id từ API listing Nhà Tốt."""
     ids = set()
     per_page = 20
-    first_id = 2999
+    first_id = 0
 
     for page in range(0, limit_ids // per_page + 2):
         offset = page * per_page + first_id
@@ -69,6 +69,10 @@ def extract_one(raw):
     area = ad.get("area")
     ppm2 = price / area if (price and area and area > 0) else None
 
+    # Lấy tên quận/huyện và loại bỏ prefix "Quận" hoặc "Huyện"
+    district_raw = ad.get("area_name", "")
+    district = district_raw.replace("Quận ", "").replace("Huyện ", "") if district_raw else district_raw
+
     return {
         "id": ad.get("list_id"),
         "title": ad.get("subject"),
@@ -77,7 +81,7 @@ def extract_one(raw):
         "area_m2": area,
         "price_per_m2": ppm2,
         "region": ad.get("region_name"),
-        "district": ad.get("area_name"),
+        "district": district,
         "ward": ad.get("ward_name"),
         "street": ad.get("street_name"),
         "lat": ad.get("latitude"),

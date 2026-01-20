@@ -83,9 +83,11 @@ cleaned_df = parsed_df \
     .filter(col("price") > 0) \
     .filter(col("area_m2").isNotNull()) \
     .filter(col("area_m2") > 0) \
+    .filter(~((col("category") == 1020) & (col("area_m2") < 20))) \
     .withColumn("processing_time", current_timestamp()) \
     .withColumn("category", 
-                when((col("category") == 1030) & (col("price") > 300000000), 1020)
+                when((col("category") == 1030) & (col("price") > 300000000), 1020)  #Nếu giá thuê > 300 triệu thì chuyển sang bán
+                .when((col("category") == 1010) & (col("price") < 50000000), 1050)  #Nêu giá bán < 50 triệu thì chuyển sang thuê
                 .otherwise(col("category"))) \
     .withColumn("price_billion", round(col("price") / 1000000000, 2)) \
     .withColumn("price_category", 

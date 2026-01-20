@@ -921,6 +921,7 @@ sudo systemctl status mongod
 
 #### 6.2. Chạy Spark Streaming
 ```bash
+
 # Bước 1: Activate virtual environment
 source ~/spark-venv/bin/activate
 
